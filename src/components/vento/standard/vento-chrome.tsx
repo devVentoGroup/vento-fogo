@@ -15,11 +15,14 @@ type SiteOption = {
   site_type?: string | null;
 };
 
+type IconName = "dashboard" | "book" | "flask";
+
 type NavItem = {
   href: string;
   label: string;
   description?: string;
   required?: string[];
+  icon?: IconName;
 };
 
 type NavGroup = {
@@ -43,7 +46,15 @@ const APP_TAGLINE = "Recetas, produccion y lotes";
 const NAV_GROUPS: NavGroup[] = [
   {
     label: "Inicio",
-    items: [{ href: "/", label: "Panel", description: "Resumen operativo", required: ["access"] }],
+    items: [
+      {
+        href: "/",
+        label: "Panel",
+        description: "Resumen operativo",
+        required: ["access"],
+        icon: "dashboard",
+      },
+    ],
   },
   {
     label: "Produccion",
@@ -53,16 +64,50 @@ const NAV_GROUPS: NavGroup[] = [
         label: "Recetas",
         description: "BOM, pasos y medios",
         required: ["production.recipes"],
+        icon: "book",
       },
       {
         href: "/production-batches",
         label: "Lotes",
         description: "Consumo y salida de terminado",
         required: ["production.batches"],
+        icon: "flask",
       },
     ],
   },
 ];
+
+function Icon({ name }: { name?: IconName }) {
+  switch (name) {
+    case "dashboard":
+      return (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+          <path d="M4 4h7v7H4z" />
+          <path d="M13 4h7v5h-7z" />
+          <path d="M13 11h7v9h-7z" />
+          <path d="M4 13h7v7H4z" />
+        </svg>
+      );
+    case "book":
+      return (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+          <path d="M4 5a2 2 0 0 1 2-2h12v16H6a2 2 0 0 0-2 2z" />
+          <path d="M6 3v16" />
+          <path d="M10 7h6" />
+          <path d="M10 11h6" />
+        </svg>
+      );
+    case "flask":
+      return (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+          <path d="M10 2v5l-5.5 9.5A3 3 0 0 0 7.1 21h9.8a3 3 0 0 0 2.6-4.5L14 7V2" />
+          <path d="M9 11h6" />
+        </svg>
+      );
+    default:
+      return null;
+  }
+}
 
 function SidebarLink({
   item,
@@ -75,6 +120,9 @@ function SidebarLink({
 }) {
   return (
     <Link href={item.href} onClick={onNavigate} className={`ui-sidebar-item ${active ? "active" : ""}`}>
+      <span className="ui-sidebar-item-icon">
+        <Icon name={item.icon} />
+      </span>
       <span className="ui-sidebar-item-content">
         <span className="ui-sidebar-item-title">{item.label}</span>
         {item.description ? <span className="ui-sidebar-item-desc">{item.description}</span> : null}
@@ -115,7 +163,6 @@ export function VentoChrome({
     let activeRequest = true;
     const supabase = createClient();
     const siteId = currentSiteId || activeSiteId || null;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setPermissionsReady(false);
 
     Promise.all(
@@ -172,7 +219,7 @@ export function VentoChrome({
           }`}
         >
           <div className="flex items-center justify-between">
-            <VentoLogo entity="fogo" title="Vento OS" subtitle={`${APP_NAME} · Produccion`} />
+            <VentoLogo entity="fogo" title="Vento OS" subtitle={`${APP_NAME} - Produccion`} />
             <button
               type="button"
               onClick={() => setMenuOpen(false)}
@@ -183,9 +230,7 @@ export function VentoChrome({
           </div>
 
           <div className="rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-4 py-3">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ui-muted)]">
-              Sede activa
-            </div>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ui-muted)]">Sede activa</div>
             <div className="mt-1 text-sm font-semibold text-[var(--ui-text)]">{currentSiteLabel}</div>
           </div>
 
@@ -201,17 +246,10 @@ export function VentoChrome({
             ) : (
               visibleGroups.map((group) => (
                 <div key={group.label} className="space-y-2">
-                  <div className="px-2 text-xs font-semibold uppercase tracking-wide text-[var(--ui-muted)]">
-                    {group.label}
-                  </div>
+                  <div className="px-2 text-xs font-semibold uppercase tracking-wide text-[var(--ui-muted)]">{group.label}</div>
                   <div className="space-y-1">
                     {group.items.map((item) => (
-                      <SidebarLink
-                        key={item.href}
-                        item={item}
-                        active={isActive(item.href)}
-                        onNavigate={() => setMenuOpen(false)}
-                      />
+                      <SidebarLink key={item.href} item={item} active={isActive(item.href)} onNavigate={() => setMenuOpen(false)} />
                     ))}
                   </div>
                 </div>
@@ -233,7 +271,6 @@ export function VentoChrome({
                 </button>
                 <div className="hidden sm:flex items-center gap-3">
                   <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--ui-surface-2)] ring-1 ring-inset ring-[var(--ui-border)]">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={`/logos/${APP_ENTITY}.svg`} alt={APP_NAME} className="h-6 w-6" />
                   </div>
                   <div className="flex flex-col leading-tight">

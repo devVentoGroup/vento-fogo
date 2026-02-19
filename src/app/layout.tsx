@@ -17,7 +17,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Vento OS · FOGO",
+  title: "Vento OS - FOGO",
   description: "Recetas, produccion y lotes operativos.",
   applicationName: "Vento OS",
   authors: [{ name: "Vento Group" }],

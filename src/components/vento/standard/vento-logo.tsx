@@ -132,7 +132,7 @@ export function VentoLogo({
 }: VentoLogoProps) {
   const resolvedTitle = title ?? "Vento OS";
   const resolvedSubtitle =
-    subtitle ?? (entity === "origo" ? "ORIGO · Compras" : entity.toUpperCase());
+    subtitle ?? (entity === "origo" ? "ORIGO - Compras" : entity.toUpperCase());
 
   return (
     <div className={`flex items-center gap-3 ${className ?? ""}`}>
@@ -150,3 +150,4 @@ export function VentoLogo({
     </div>
   );
 }
+

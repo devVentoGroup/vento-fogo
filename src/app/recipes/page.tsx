@@ -6,6 +6,7 @@ export const dynamic = "force-dynamic";
 
 const APP_ID = "fogo";
 const NEXO_BASE_URL = process.env.NEXT_PUBLIC_NEXO_URL?.replace(/\/$/, "") || "https://nexo.ventogroup.co";
+const FOGO_BASE_URL = process.env.NEXT_PUBLIC_FOGO_URL?.replace(/\/$/, "") || "https://fogo.ventogroup.co";
 
 type ProductShape = { name: string | null; sku: string | null; unit: string | null };
 
@@ -17,6 +18,14 @@ type RecipeCardRow = {
   status: "draft" | "published" | "archived";
   updated_at: string;
   products?: ProductShape | ProductShape[] | null;
+};
+
+type FocusProductRow = {
+  id: string;
+  name: string | null;
+  sku: string | null;
+  product_type: string | null;
+  unit: string | null;
 };
 
 function asDate(value: string) {
@@ -36,13 +45,31 @@ function resolveProduct(value: ProductShape | ProductShape[] | null | undefined)
   return value;
 }
 
+function buildRecipeNewUrl(params: { productId?: string; siteId?: string; source?: string }) {
+  const url = new URL("/recipes/new", FOGO_BASE_URL);
+  if (params.productId) url.searchParams.set("product_id", params.productId);
+  if (params.siteId) url.searchParams.set("site_id", params.siteId);
+  if (params.source) url.searchParams.set("source", params.source);
+  return url.toString();
+}
+
 export default async function RecipesPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ site_id?: string }>;
+  searchParams?: Promise<{
+    site_id?: string;
+    product_id?: string;
+    source?: string;
+    created?: string;
+    error?: string;
+  }>;
 }) {
   const sp = (await searchParams) ?? {};
   const siteId = String(sp.site_id ?? "").trim();
+  const productId = String(sp.product_id ?? "").trim();
+  const source = String(sp.source ?? "").trim().toLowerCase();
+  const created = String(sp.created ?? "").trim() === "1";
+  const error = String(sp.error ?? "").trim();
 
   const { supabase } = await requireAppAccess({
     appId: APP_ID,
@@ -62,6 +89,26 @@ export default async function RecipesPage({
 
   const { data: recipeCardsData } = await query;
   const recipeCards = ((recipeCardsData ?? []) as unknown[]) as RecipeCardRow[];
+  const focusedRecipeCard = productId ? recipeCards.find((row) => row.product_id === productId) ?? null : null;
+
+  let focusedProduct: FocusProductRow | null = null;
+  let existingRecipeForFocusedProduct: { id: string; status: string; site_id: string | null } | null = null;
+  if (productId) {
+    const [{ data: productData }, { data: existingCardData }] = await Promise.all([
+      supabase
+        .from("products")
+        .select("id,name,sku,product_type,unit")
+        .eq("id", productId)
+        .maybeSingle(),
+      supabase
+        .from("recipe_cards")
+        .select("id,status,site_id")
+        .eq("product_id", productId)
+        .maybeSingle(),
+    ]);
+    focusedProduct = (productData as FocusProductRow | null) ?? null;
+    existingRecipeForFocusedProduct = (existingCardData as { id: string; status: string; site_id: string | null } | null) ?? null;
+  }
 
   const productIds = Array.from(new Set(recipeCards.map((r) => r.product_id)));
   const recipeCardIds = recipeCards.map((r) => r.id);
@@ -98,10 +145,47 @@ export default async function RecipesPage({
   return (
     <div className="space-y-6">
       <section className="ui-panel ui-panel--halo">
-        <h1 className="ui-h1">Recetas</h1>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h1 className="ui-h1">Recetas</h1>
+          <Link
+            href={siteId ? `/recipes/new?site_id=${encodeURIComponent(siteId)}` : "/recipes/new"}
+            className="ui-btn ui-btn--brand ui-btn--sm"
+          >
+            Crear receta
+          </Link>
+        </div>
         <p className="mt-2 ui-body-muted">
           Recetario operativo (BOM + pasos). Aqui puedes auditar estado, ingredientes y pasos por producto.
         </p>
+        {created ? (
+          <div className="mt-3 ui-alert ui-alert--success">
+            Receta creada en borrador. Continua en FOGO para completar ingredientes y pasos.
+          </div>
+        ) : null}
+        {error ? <div className="mt-3 ui-alert ui-alert--warn">{error}</div> : null}
+        {productId && focusedProduct ? (
+          <div className="mt-3 ui-panel-soft p-3 text-sm text-[var(--ui-muted)]">
+            <p>
+              Producto foco desde {source === "nexo" ? "NEXO" : "enlace externo"}:
+              <strong className="ml-1 text-[var(--ui-text)]">{focusedProduct.name ?? "Producto"}</strong>
+              <span className="ml-1">({focusedProduct.sku ?? "-"})</span>
+            </p>
+            {existingRecipeForFocusedProduct ? (
+              <p className="mt-1">
+                Ya existe una receta ({existingRecipeForFocusedProduct.status}). Puedes editarla en esta vista.
+              </p>
+            ) : (
+              <div className="mt-2">
+                <a
+                  href={buildRecipeNewUrl({ productId, siteId, source: source || "nexo" })}
+                  className="ui-btn ui-btn--ghost ui-btn--sm"
+                >
+                  Crear receta para este producto
+                </a>
+              </div>
+            )}
+          </div>
+        ) : null}
         <div className="mt-4 grid gap-3 sm:grid-cols-3">
           <div className="ui-panel-soft">
             <div className="ui-label">Total recetas</div>
@@ -166,9 +250,17 @@ export default async function RecipesPage({
                     </td>
                     <td className="ui-td">{asDate(row.updated_at)}</td>
                     <td className="ui-td">
-                      <Link className="ui-btn ui-btn--ghost ui-btn--sm" href="/production-batches">
-                        Ver lotes
-                      </Link>
+                      <div className="flex flex-wrap gap-2">
+                        <Link
+                          className="ui-btn ui-btn--ghost ui-btn--sm"
+                          href={`/recipes/new?product_id=${encodeURIComponent(row.product_id)}${siteId ? `&site_id=${encodeURIComponent(siteId)}` : ""}`}
+                        >
+                          Editar ficha
+                        </Link>
+                        <Link className="ui-btn ui-btn--ghost ui-btn--sm" href="/production-batches">
+                          Ver lotes
+                        </Link>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -176,7 +268,9 @@ export default async function RecipesPage({
               {recipeCards.length === 0 ? (
                 <tr>
                   <td className="ui-td ui-empty" colSpan={8}>
-                    No hay recetas para la sede activa.
+                    {focusedRecipeCard
+                      ? "No se encontro la receta en la sede activa. Cambia de sede para verla."
+                      : "No hay recetas para la sede activa."}
                   </td>
                 </tr>
               ) : null}

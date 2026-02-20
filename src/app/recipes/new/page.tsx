@@ -19,6 +19,7 @@ type ProductOption = {
   name: string | null;
   sku: string | null;
   unit: string | null;
+  stock_unit_code?: string | null;
   cost: number | null;
   product_type: string | null;
   is_active: boolean | null;
@@ -62,6 +63,10 @@ function asPositive(value: FormDataEntryValue | null, fallback: number) {
   return parsed != null && parsed > 0 ? parsed : fallback;
 }
 
+function normalizeUnitCode(value: string | null | undefined) {
+  return String(value ?? "").trim().toLowerCase();
+}
+
 function withQuery(path: string, key: string, value: string) {
   return `${path}${path.includes("?") ? "&" : "?"}${key}=${encodeURIComponent(value)}`;
 }
@@ -95,7 +100,7 @@ async function saveRecipe(formData: FormData) {
 
   const { data: product } = await supabase
     .from("products")
-    .select("id,name,sku,unit,product_type,is_active")
+    .select("id,name,sku,unit,stock_unit_code,product_type,is_active")
     .eq("id", productId)
     .maybeSingle();
   const productRow = (product as ProductOption | null) ?? null;
@@ -188,6 +193,78 @@ async function saveRecipe(formData: FormData) {
     );
     if (insertIngredientsErr) {
       redirect(withQuery(returnBase, "error", insertIngredientsErr.message));
+    }
+  }
+
+  // Auto-costo receta: suma ingredientes / rendimiento expresado en unidad base del producto.
+  // Aplica aunque el modo en NEXO sea manual para preparaciones/venta.
+  if (normalizedIngredients.length > 0) {
+    const ingredientIds = Array.from(
+      new Set(normalizedIngredients.map((line) => line.ingredient_product_id))
+    );
+    const { data: ingredientProducts } = await supabase
+      .from("products")
+      .select("id,cost")
+      .in("id", ingredientIds);
+
+    const ingredientCostMap = new Map<string, number>();
+    for (const row of (ingredientProducts ?? []) as Array<{ id: string; cost: number | null }>) {
+      ingredientCostMap.set(row.id, Number(row.cost ?? 0));
+    }
+
+    const totalIngredientCost = normalizedIngredients.reduce((acc, line) => {
+      const unitCost = ingredientCostMap.get(line.ingredient_product_id) ?? 0;
+      return acc + unitCost * Number(line.quantity);
+    }, 0);
+
+    const yieldQtyRaw = Number(recipePayload.yield_qty ?? 0);
+    const yieldUnitCode = normalizeUnitCode(String(recipePayload.yield_unit ?? ""));
+    const stockUnitCode = normalizeUnitCode(
+      String(productRow.stock_unit_code ?? productRow.unit ?? "")
+    );
+
+    let yieldQtyInStockUnit = yieldQtyRaw;
+    if (
+      yieldQtyRaw > 0 &&
+      yieldUnitCode &&
+      stockUnitCode &&
+      yieldUnitCode !== stockUnitCode
+    ) {
+      const { data: unitsData } = await supabase
+        .from("inventory_units")
+        .select("code,family,factor_to_base")
+        .in("code", [yieldUnitCode, stockUnitCode]);
+      const unitMap = new Map(
+        ((unitsData ?? []) as Array<{ code: string; family: string | null; factor_to_base: number | null }>).map(
+          (row) => [normalizeUnitCode(row.code), row]
+        )
+      );
+      const fromUnit = unitMap.get(yieldUnitCode);
+      const toUnit = unitMap.get(stockUnitCode);
+      if (
+        fromUnit &&
+        toUnit &&
+        fromUnit.family &&
+        toUnit.family &&
+        fromUnit.family === toUnit.family &&
+        Number(fromUnit.factor_to_base) > 0 &&
+        Number(toUnit.factor_to_base) > 0
+      ) {
+        yieldQtyInStockUnit =
+          yieldQtyRaw *
+          (Number(fromUnit.factor_to_base) / Number(toUnit.factor_to_base));
+      }
+    }
+
+    if (yieldQtyInStockUnit > 0 && Number.isFinite(totalIngredientCost) && totalIngredientCost >= 0) {
+      const recipeUnitCost = totalIngredientCost / yieldQtyInStockUnit;
+      await supabase
+        .from("products")
+        .update({
+          cost: Number(recipeUnitCost.toFixed(6)),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", productId);
     }
   }
 
@@ -318,14 +395,14 @@ export default async function NewRecipePage({
         .limit(600),
       supabase
         .from("products")
-        .select("id,name,sku,unit,cost,product_type,is_active")
+        .select("id,name,sku,unit,stock_unit_code,cost,product_type,is_active")
         .in("product_type", ["preparacion", "venta"])
         .eq("is_active", true)
         .order("name", { ascending: true })
         .limit(800),
       supabase
         .from("products")
-        .select("id,name,sku,unit,cost,product_type,is_active")
+        .select("id,name,sku,unit,stock_unit_code,cost,product_type,is_active")
         .in("product_type", ["insumo", "preparacion"])
         .eq("is_active", true)
         .order("name", { ascending: true })
@@ -601,4 +678,3 @@ export default async function NewRecipePage({
     </div>
   );
 }
-

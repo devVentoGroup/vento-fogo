@@ -61,6 +61,7 @@ export default async function RecipesPage({
     product_id?: string;
     source?: string;
     created?: string;
+    saved?: string;
     error?: string;
   }>;
 }) {
@@ -69,6 +70,7 @@ export default async function RecipesPage({
   const productId = String(sp.product_id ?? "").trim();
   const source = String(sp.source ?? "").trim().toLowerCase();
   const created = String(sp.created ?? "").trim() === "1";
+  const saved = String(sp.saved ?? "").trim() === "1";
   const error = String(sp.error ?? "").trim();
 
   const { supabase } = await requireAppAccess({
@@ -160,6 +162,11 @@ export default async function RecipesPage({
         {created ? (
           <div className="mt-3 ui-alert ui-alert--success">
             Receta creada en borrador. Continua en FOGO para completar ingredientes y pasos.
+          </div>
+        ) : null}
+        {saved ? (
+          <div className="mt-3 ui-alert ui-alert--success">
+            Receta guardada correctamente.
           </div>
         ) : null}
         {error ? <div className="mt-3 ui-alert ui-alert--warn">{error}</div> : null}

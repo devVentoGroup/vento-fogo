@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { requireAppAccess } from "@/lib/auth/guard";
+import { RecipeBaseFields } from "@/features/recipes/recipe-base-fields";
 import {
   RecipeIngredientsEditor,
   type IngredientLine,
@@ -13,6 +14,8 @@ import {
 export const dynamic = "force-dynamic";
 
 const APP_ID = "fogo";
+const NEXO_BASE_URL =
+  process.env.NEXT_PUBLIC_NEXO_URL?.replace(/\/$/, "") || "https://nexo.ventogroup.co";
 
 type ProductOption = {
   id: string;
@@ -44,6 +47,14 @@ type RecipeCardRow = {
   difficulty: string | null;
   recipe_description: string | null;
   status: "draft" | "published" | "archived";
+  is_active: boolean;
+};
+
+type UnitOption = {
+  code: string;
+  name: string | null;
+  family: string | null;
+  factor_to_base: number | null;
   is_active: boolean;
 };
 
@@ -114,17 +125,86 @@ async function saveRecipe(formData: FormData) {
     redirect(withQuery(returnBase, "error", "Solo se permiten productos tipo preparacion o venta."));
   }
 
+  const ingredientRaw = asText(formData.get("ingredient_lines"));
+  let ingredientLines: IngredientLine[] = [];
+  if (ingredientRaw) {
+    try {
+      ingredientLines = JSON.parse(ingredientRaw) as IngredientLine[];
+    } catch {
+      redirect(withQuery(returnBase, "error", "Formato invalido en ingredientes."));
+    }
+  }
+
+  const normalizedIngredients = ingredientLines
+    .filter((line) => !line._delete)
+    .map((line) => ({
+      ingredient_product_id: String(line.ingredient_product_id || "").trim(),
+      quantity: Number(line.quantity ?? 0),
+    }))
+    .filter((line) => line.ingredient_product_id && Number.isFinite(line.quantity) && line.quantity > 0);
+
+  const stepsRaw = asText(formData.get("recipe_steps"));
+  let steps: RecipeStepLine[] = [];
+  if (stepsRaw) {
+    try {
+      steps = JSON.parse(stepsRaw) as RecipeStepLine[];
+    } catch {
+      redirect(withQuery(returnBase, "error", "Formato invalido en pasos."));
+    }
+  }
+
+  const normalizedStepDraft = steps
+    .filter((step) => !step._delete)
+    .map((step) => ({
+      description: String(step.description ?? "").trim(),
+      tip: String(step.tip ?? "").trim() || null,
+      time_minutes:
+        Number.isFinite(Number(step.time_minutes)) && Number(step.time_minutes) >= 0
+          ? Number(step.time_minutes)
+          : null,
+      image_path: String(step.step_image_url ?? "").trim() || null,
+      original_order:
+        Number.isFinite(Number(step.step_number)) && Number(step.step_number) > 0
+          ? Number(step.step_number)
+          : 9999,
+    }))
+    .filter((step) => step.description.length > 0)
+    .sort((a, b) => a.original_order - b.original_order);
+
+  const statusRaw = (asText(formData.get("status")) || "draft").toLowerCase();
+  const status: "draft" | "published" | "archived" =
+    statusRaw === "published" || statusRaw === "archived" ? statusRaw : "draft";
+  const yieldQty = asPositive(formData.get("yield_qty"), 1);
+  const yieldUnit = asText(formData.get("yield_unit")) || productRow.unit || "un";
+  const portionSize = asNullableNumber(formData.get("portion_size"));
+  const portionUnit = asText(formData.get("portion_unit")) || null;
+
+  if (status === "published") {
+    if (!yieldQty || yieldQty <= 0 || !yieldUnit) {
+      redirect(withQuery(returnBase, "error", "Para publicar debes completar rendimiento y unidad."));
+    }
+    if (!portionSize || portionSize <= 0 || !portionUnit) {
+      redirect(withQuery(returnBase, "error", "Para publicar debes completar porcion y unidad de porcion."));
+    }
+    if (normalizedIngredients.length <= 0) {
+      redirect(withQuery(returnBase, "error", "Para publicar debes tener al menos 1 ingrediente activo en BOM."));
+    }
+    if (normalizedStepDraft.length <= 0) {
+      redirect(withQuery(returnBase, "error", "Para publicar debes tener al menos 1 paso de preparacion."));
+    }
+  }
+
   const recipePayload: Record<string, unknown> = {
     product_id: productId,
-    yield_qty: asPositive(formData.get("yield_qty"), 1),
-    yield_unit: asText(formData.get("yield_unit")) || productRow.unit || "un",
-    portion_size: asNullableNumber(formData.get("portion_size")),
-    portion_unit: asText(formData.get("portion_unit")) || null,
+    yield_qty: yieldQty,
+    yield_unit: yieldUnit,
+    portion_size: portionSize,
+    portion_unit: portionUnit,
     prep_time_minutes: asNullableNumber(formData.get("prep_time_minutes")),
     shelf_life_days: asNullableNumber(formData.get("shelf_life_days")),
     difficulty: asText(formData.get("difficulty")) || null,
     recipe_description: asText(formData.get("recipe_description")) || null,
-    status: (asText(formData.get("status")) || "draft").toLowerCase(),
+    status,
     is_active: asText(formData.get("is_active")) === "1",
   };
   if (siteId) recipePayload.site_id = siteId;
@@ -155,24 +235,6 @@ async function saveRecipe(formData: FormData) {
       redirect(withQuery(returnBase, "error", updateErr.message));
     }
   }
-
-  const ingredientRaw = asText(formData.get("ingredient_lines"));
-  let ingredientLines: IngredientLine[] = [];
-  if (ingredientRaw) {
-    try {
-      ingredientLines = JSON.parse(ingredientRaw) as IngredientLine[];
-    } catch {
-      redirect(withQuery(returnBase, "error", "Formato invalido en ingredientes."));
-    }
-  }
-
-  const normalizedIngredients = ingredientLines
-    .filter((line) => !line._delete)
-    .map((line) => ({
-      ingredient_product_id: String(line.ingredient_product_id || "").trim(),
-      quantity: Number(line.quantity ?? 0),
-    }))
-    .filter((line) => line.ingredient_product_id && Number.isFinite(line.quantity) && line.quantity > 0);
 
   const { error: deleteIngredientsErr } = await supabase
     .from("recipes")
@@ -268,33 +330,7 @@ async function saveRecipe(formData: FormData) {
     }
   }
 
-  const stepsRaw = asText(formData.get("recipe_steps"));
-  let steps: RecipeStepLine[] = [];
-  if (stepsRaw) {
-    try {
-      steps = JSON.parse(stepsRaw) as RecipeStepLine[];
-    } catch {
-      redirect(withQuery(returnBase, "error", "Formato invalido en pasos."));
-    }
-  }
-
-  const normalizedSteps = steps
-    .filter((step) => !step._delete)
-    .map((step) => ({
-      description: String(step.description ?? "").trim(),
-      tip: String(step.tip ?? "").trim() || null,
-      time_minutes:
-        Number.isFinite(Number(step.time_minutes)) && Number(step.time_minutes) >= 0
-          ? Number(step.time_minutes)
-          : null,
-      image_path: String(step.step_image_url ?? "").trim() || null,
-      original_order:
-        Number.isFinite(Number(step.step_number)) && Number(step.step_number) > 0
-          ? Number(step.step_number)
-          : 9999,
-    }))
-    .filter((step) => step.description.length > 0)
-    .sort((a, b) => a.original_order - b.original_order)
+  const normalizedSteps = normalizedStepDraft
     .map((step, index) => ({
       recipe_card_id: recipeCardId,
       step_number: index + 1,
@@ -384,7 +420,12 @@ export default async function NewRecipePage({
     employeeSiteIds[0] ||
     String(employeeRow?.site_id ?? "").trim();
 
-  const [{ data: recipeCardsData }, { data: productRows }, { data: ingredientRows }] =
+  const [
+    { data: recipeCardsData },
+    { data: productRows },
+    { data: ingredientRows },
+    { data: unitsData },
+  ] =
     await Promise.all([
       supabase
         .from("recipe_cards")
@@ -407,11 +448,18 @@ export default async function NewRecipePage({
         .eq("is_active", true)
         .order("name", { ascending: true })
         .limit(1200),
+      supabase
+        .from("inventory_units")
+        .select("code,name,family,factor_to_base,is_active")
+        .eq("is_active", true)
+        .order("family", { ascending: true })
+        .order("factor_to_base", { ascending: true }),
     ]);
 
   const recipeCards = (recipeCardsData ?? []) as RecipeCardRow[];
   const products = (productRows ?? []) as ProductOption[];
   const ingredientOptions = (ingredientRows ?? []) as ProductOption[];
+  const units = (unitsData ?? []) as UnitOption[];
 
   const selectedProductId =
     requestedProductId ||
@@ -542,6 +590,9 @@ export default async function NewRecipePage({
                 <option value="published">Publicada</option>
                 <option value="archived">Archivada</option>
               </select>
+              <span className="text-xs text-[var(--ui-muted)]">
+                Para publicar: rendimiento + porcion completos, minimo 1 ingrediente y 1 paso.
+              </span>
             </label>
 
             <label className="flex items-center gap-2 pt-8">
@@ -556,97 +607,22 @@ export default async function NewRecipePage({
           </div>
         </section>
 
-        <section className="ui-panel space-y-4">
-          <h2 className="ui-h2">Ficha base</h2>
-          <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3">
-            <label className="flex flex-col gap-1">
-              <span className="ui-label">Rendimiento (cantidad)</span>
-              <input
-                type="number"
-                step="0.01"
-                min="0.01"
-                name="yield_qty"
-                defaultValue={selectedRecipeCard?.yield_qty ?? 1}
-                className="ui-input"
-                required
-              />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="ui-label">Unidad rendimiento</span>
-              <input
-                type="text"
-                name="yield_unit"
-                defaultValue={defaultYieldUnit}
-                className="ui-input"
-                required
-              />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="ui-label">Tiempo prep. (min)</span>
-              <input
-                type="number"
-                min="0"
-                name="prep_time_minutes"
-                defaultValue={selectedRecipeCard?.prep_time_minutes ?? ""}
-                className="ui-input"
-              />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="ui-label">Porcion (tamano)</span>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                name="portion_size"
-                defaultValue={selectedRecipeCard?.portion_size ?? ""}
-                className="ui-input"
-              />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="ui-label">Unidad porcion</span>
-              <input
-                type="text"
-                name="portion_unit"
-                defaultValue={selectedRecipeCard?.portion_unit ?? ""}
-                className="ui-input"
-              />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="ui-label">Vida util (dias)</span>
-              <input
-                type="number"
-                min="0"
-                name="shelf_life_days"
-                defaultValue={selectedRecipeCard?.shelf_life_days ?? ""}
-                className="ui-input"
-              />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="ui-label">Dificultad</span>
-              <select
-                name="difficulty"
-                defaultValue={selectedRecipeCard?.difficulty ?? ""}
-                className="ui-input"
-              >
-                <option value="">Sin definir</option>
-                <option value="facil">Facil</option>
-                <option value="medio">Medio</option>
-                <option value="dificil">Dificil</option>
-              </select>
-            </label>
-          </div>
-
-          <label className="flex flex-col gap-1">
-            <span className="ui-label">Descripcion de receta</span>
-            <textarea
-              name="recipe_description"
-              rows={3}
-              defaultValue={selectedRecipeCard?.recipe_description ?? ""}
-              className="ui-input min-h-0 py-2"
-              placeholder="Resumen de tecnica, mise en place y notas clave..."
-            />
-          </label>
-        </section>
+        <RecipeBaseFields
+          initialYieldQty={selectedRecipeCard?.yield_qty ?? 1}
+          initialYieldUnit={defaultYieldUnit}
+          initialPortionSize={selectedRecipeCard?.portion_size ?? null}
+          initialPortionUnit={selectedRecipeCard?.portion_unit ?? null}
+          initialPrepTimeMinutes={selectedRecipeCard?.prep_time_minutes ?? null}
+          initialShelfLifeDays={selectedRecipeCard?.shelf_life_days ?? null}
+          initialDifficulty={selectedRecipeCard?.difficulty ?? null}
+          initialDescription={selectedRecipeCard?.recipe_description ?? null}
+          units={units}
+          nexoCatalogUrl={
+            selectedProductId
+              ? `${NEXO_BASE_URL}/inventory/catalog/${encodeURIComponent(selectedProductId)}`
+              : `${NEXO_BASE_URL}/inventory/catalog`
+          }
+        />
 
         <section className="ui-panel space-y-4">
           <h2 className="ui-h2">Ingredientes (BOM)</h2>

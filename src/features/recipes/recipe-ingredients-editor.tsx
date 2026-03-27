@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 export type IngredientLine = {
   id?: string;
@@ -38,6 +39,13 @@ export function RecipeIngredientsEditor({
   );
   const [lineSearch, setLineSearch] = useState<Record<number, string>>({});
   const [openRow, setOpenRow] = useState<number | null>(null);
+  const [dropdownRect, setDropdownRect] = useState<{
+    top: number;
+    left: number;
+    width: number;
+  } | null>(null);
+  const inputRefs = useRef<Record<number, HTMLInputElement | null>>({});
+  const dropdownRef = useRef<HTMLDivElement | null>(null);
 
   const productMap = useMemo(
     () => new Map(products.map((p) => [p.id, p])),
@@ -78,6 +86,7 @@ export function RecipeIngredientsEditor({
       }
       return prev.filter((_, i) => i !== index);
     });
+    setOpenRow(null);
     setLineSearch((prev) => {
       const next = { ...prev };
       delete next[index];
@@ -95,6 +104,59 @@ export function RecipeIngredientsEditor({
     }
     return total;
   }, [visibleLines, productMap]);
+
+  const updateDropdownPosition = useCallback((rowIndex: number | null) => {
+    if (rowIndex == null) return;
+    const node = inputRefs.current[rowIndex];
+    if (!node) return;
+    const rect = node.getBoundingClientRect();
+    setDropdownRect({
+      top: rect.bottom + 4,
+      left: rect.left,
+      width: rect.width,
+    });
+  }, []);
+
+  const openText =
+    openRow != null
+      ? lineSearch[openRow] ?? productLabelById.get(lines[openRow]?.ingredient_product_id ?? "") ?? ""
+      : "";
+  const openFilteredProducts = useMemo(() => {
+    if (openRow == null) return [] as ProductOption[];
+    const query = openText.trim().toLowerCase();
+    if (!query) return products.slice(0, 30);
+    return products
+      .filter((p) => {
+        const label = `${p.name ?? p.id}${p.sku ? ` (${p.sku})` : ""}`.toLowerCase();
+        return label.includes(query);
+      })
+      .slice(0, 30);
+  }, [openRow, openText, products]);
+
+  useEffect(() => {
+    if (openRow == null) return;
+    updateDropdownPosition(openRow);
+    const handleScrollOrResize = () => updateDropdownPosition(openRow);
+    window.addEventListener("resize", handleScrollOrResize);
+    window.addEventListener("scroll", handleScrollOrResize, true);
+    return () => {
+      window.removeEventListener("resize", handleScrollOrResize);
+      window.removeEventListener("scroll", handleScrollOrResize, true);
+    };
+  }, [openRow, updateDropdownPosition]);
+
+  useEffect(() => {
+    if (openRow == null) return;
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      const inputNode = openRow != null ? inputRefs.current[openRow] : null;
+      if (inputNode && target && inputNode.contains(target)) return;
+      if (dropdownRef.current && target && dropdownRef.current.contains(target)) return;
+      setOpenRow(null);
+    };
+    window.addEventListener("mousedown", handlePointerDown);
+    return () => window.removeEventListener("mousedown", handlePointerDown);
+  }, [openRow]);
 
   return (
     <div className="space-y-3">
@@ -124,15 +186,6 @@ export function RecipeIngredientsEditor({
             lineSearch[realIndex] ??
             productLabelById.get(line.ingredient_product_id) ??
             "";
-          const query = currentText.trim().toLowerCase();
-          const filteredProducts = !query
-            ? products.slice(0, 30)
-            : products
-                .filter((p) => {
-                  const label = `${p.name ?? p.id}${p.sku ? ` (${p.sku})` : ""}`.toLowerCase();
-                  return label.includes(query);
-                })
-                .slice(0, 30);
           return (
             <div
               key={line.id ?? `new-${index}`}
@@ -145,12 +198,19 @@ export function RecipeIngredientsEditor({
                 <div className="relative">
                   <input
                     type="text"
+                    ref={(node) => {
+                      inputRefs.current[realIndex] = node;
+                    }}
                     value={currentText}
-                    onFocus={() => setOpenRow(realIndex)}
+                    onFocus={() => {
+                      setOpenRow(realIndex);
+                      window.requestAnimationFrame(() => updateDropdownPosition(realIndex));
+                    }}
                     onChange={(e) => {
                       const raw = e.target.value;
                       setLineSearch((prev) => ({ ...prev, [realIndex]: raw }));
                       setOpenRow(realIndex);
+                      window.requestAnimationFrame(() => updateDropdownPosition(realIndex));
                       const exact = productByExactLabel.get(raw);
                       if (exact) {
                         updateLine(realIndex, { ingredient_product_id: exact.id });
@@ -162,7 +222,6 @@ export function RecipeIngredientsEditor({
                     }}
                     onBlur={() => {
                       window.setTimeout(() => {
-                        setOpenRow((prev) => (prev === realIndex ? null : prev));
                         setLineSearch((prev) => {
                           const typed = (prev[realIndex] ?? "").trim();
                           const exact = productByExactLabel.get(typed);
@@ -178,34 +237,6 @@ export function RecipeIngredientsEditor({
                     className="ui-input"
                     placeholder="Buscar ingrediente por nombre o SKU..."
                   />
-                  {openRow === realIndex ? (
-                    <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-56 overflow-auto rounded-lg border border-[var(--ui-border)] bg-[var(--ui-panel)] shadow-xl">
-                      {filteredProducts.length > 0 ? (
-                        filteredProducts.map((p) => {
-                          const label = `${p.name ?? p.id}${p.sku ? ` (${p.sku})` : ""}`;
-                          return (
-                            <button
-                              key={p.id}
-                              type="button"
-                              onMouseDown={(event) => {
-                                event.preventDefault();
-                                updateLine(realIndex, { ingredient_product_id: p.id });
-                                setLineSearch((prev) => ({ ...prev, [realIndex]: label }));
-                                setOpenRow(null);
-                              }}
-                              className="block w-full px-3 py-2 text-left text-sm hover:bg-[var(--ui-panel-soft)]"
-                            >
-                              {label}
-                            </button>
-                          );
-                        })
-                      ) : (
-                        <div className="px-3 py-2 text-sm text-[var(--ui-muted)]">
-                          Sin coincidencias
-                        </div>
-                      )}
-                    </div>
-                  ) : null}
                 </div>
               </div>
               <div className="md:col-span-2">
@@ -271,6 +302,46 @@ export function RecipeIngredientsEditor({
           </span>
         </div>
       ) : null}
+      {typeof document !== "undefined" && openRow != null && dropdownRect
+        ? createPortal(
+            <div
+              ref={dropdownRef}
+              className="z-[9999] max-h-56 overflow-auto rounded-lg border border-[var(--ui-border)] bg-[var(--ui-panel)] shadow-2xl"
+              style={{
+                position: "fixed",
+                top: dropdownRect.top,
+                left: dropdownRect.left,
+                width: dropdownRect.width,
+              }}
+            >
+              {openFilteredProducts.length > 0 ? (
+                openFilteredProducts.map((p) => {
+                  const label = `${p.name ?? p.id}${p.sku ? ` (${p.sku})` : ""}`;
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onMouseDown={(event) => {
+                        event.preventDefault();
+                        updateLine(openRow, { ingredient_product_id: p.id });
+                        setLineSearch((prev) => ({ ...prev, [openRow]: label }));
+                        setOpenRow(null);
+                      }}
+                      className="block w-full px-3 py-2 text-left text-sm hover:bg-[var(--ui-panel-soft)]"
+                    >
+                      {label}
+                    </button>
+                  );
+                })
+              ) : (
+                <div className="px-3 py-2 text-sm text-[var(--ui-muted)]">
+                  Sin coincidencias
+                </div>
+              )}
+            </div>,
+            document.body
+          )
+        : null}
     </div>
   );
 }

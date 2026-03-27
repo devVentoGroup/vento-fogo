@@ -117,6 +117,11 @@ export function RecipeIngredientsEditor({
     return 1;
   }, []);
 
+  const isEggProduct = useCallback((product: ProductOption | undefined) => {
+    if (!product) return false;
+    return String(product.name ?? "").toLowerCase().includes("huevo");
+  }, []);
+
   const getLineTechnicalConfig = useCallback(
     (lineIndex: number, product: ProductOption | undefined): LineTechnicalConfig => {
       return (
@@ -141,9 +146,13 @@ export function RecipeIngredientsEditor({
       }
       const factor = Number(cfg.factorPerUnit ?? 0);
       if (!Number.isFinite(factor) || factor <= 0) return typedQty;
-      return typedQty / factor;
+      const converted = typedQty / factor;
+      if (isEggProduct(product)) {
+        return Math.max(1, Math.round(converted));
+      }
+      return converted;
     },
-    [getLineTechnicalConfig, productMap]
+    [getLineTechnicalConfig, isEggProduct, productMap]
   );
 
   const serializedLines = useMemo(() => {

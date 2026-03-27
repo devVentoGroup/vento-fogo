@@ -124,13 +124,12 @@ export function RecipeIngredientsEditor({
   const openFilteredProducts = useMemo(() => {
     if (openRow == null) return [] as ProductOption[];
     const query = openText.trim().toLowerCase();
-    if (!query) return products.slice(0, 30);
+    if (!query) return products;
     return products
       .filter((p) => {
         const label = `${p.name ?? p.id}${p.sku ? ` (${p.sku})` : ""}`.toLowerCase();
         return label.includes(query);
-      })
-      .slice(0, 30);
+      });
   }, [openRow, openText, products]);
 
   useEffect(() => {
@@ -306,7 +305,7 @@ export function RecipeIngredientsEditor({
         ? createPortal(
             <div
               ref={dropdownRef}
-              className="z-[9999] max-h-56 overflow-auto rounded-lg border border-[var(--ui-border)] bg-[var(--ui-panel)] shadow-2xl"
+              className="z-[99999] max-h-56 overflow-auto rounded-lg border border-[var(--ui-border)] bg-white opacity-100 shadow-2xl"
               style={{
                 position: "fixed",
                 top: dropdownRect.top,

@@ -49,7 +49,7 @@ export function RecipeBaseFields({
   units,
   nexoCatalogUrl,
 }: RecipeBaseFieldsProps) {
-  const [yieldQty, setYieldQty] = useState<number>(toPositive(initialYieldQty) || 1);
+  const [yieldQty, setYieldQty] = useState<number | "">(toPositive(initialYieldQty) || "");
   const [yieldUnit, setYieldUnit] = useState<string>(normalizeUnitCode(initialYieldUnit) || "un");
   const [portionSize, setPortionSize] = useState<number | "">(
     toPositive(initialPortionSize) || ""
@@ -90,8 +90,9 @@ export function RecipeBaseFields({
     return list;
   }, [compatiblePortionUnits, portionUnit, unitMap]);
 
+  const normalizedYieldQty = typeof yieldQty === "number" ? yieldQty : 0;
   const normalizedPortionSize = typeof portionSize === "number" ? portionSize : 0;
-  const yieldReady = yieldQty > 0 && !!yieldUnit;
+  const yieldReady = normalizedYieldQty > 0 && !!yieldUnit;
   const portionReady = normalizedPortionSize > 0 && !!portionUnit;
 
   const portionsCount = useMemo(() => {
@@ -109,14 +110,14 @@ export function RecipeBaseFields({
       return null;
     }
     const yieldInPortionUnit =
-      yieldQty * (Number(from.factor_to_base) / Number(to.factor_to_base));
+      normalizedYieldQty * (Number(from.factor_to_base) / Number(to.factor_to_base));
     if (!Number.isFinite(yieldInPortionUnit) || yieldInPortionUnit <= 0) return null;
     const count = yieldInPortionUnit / normalizedPortionSize;
     return Number.isFinite(count) && count > 0 ? count : null;
-  }, [yieldReady, portionReady, unitMap, yieldUnit, portionUnit, yieldQty, normalizedPortionSize]);
+  }, [yieldReady, portionReady, unitMap, yieldUnit, portionUnit, normalizedYieldQty, normalizedPortionSize]);
 
   const summaryText = useMemo(() => {
-    const yieldText = yieldReady ? `${formatNumber(yieldQty)} ${yieldUnit}` : "rendimiento pendiente";
+    const yieldText = yieldReady ? `${formatNumber(normalizedYieldQty)} ${yieldUnit}` : "rendimiento pendiente";
     if (!portionReady) {
       return `La receta produce ${yieldText}. Falta definir porcion para cerrar costos por unidad.`;
     }
@@ -127,7 +128,7 @@ export function RecipeBaseFields({
     return `La receta produce ${yieldText}. Cada porcion es ${portionText}. Salen aprox. ${formatNumber(
       portionsCount
     )} porciones.`;
-  }, [yieldReady, yieldQty, yieldUnit, portionReady, normalizedPortionSize, portionUnit, portionsCount]);
+  }, [yieldReady, normalizedYieldQty, yieldUnit, portionReady, normalizedPortionSize, portionUnit, portionsCount]);
 
   return (
     <section className="ui-panel space-y-4">
@@ -156,9 +157,17 @@ export function RecipeBaseFields({
                 min="0.01"
                 name="yield_qty"
                 value={yieldQty}
+                onWheel={(event) => {
+                  event.currentTarget.blur();
+                }}
                 onChange={(event) => {
-                  const value = Number(event.target.value);
-                  setYieldQty(Number.isFinite(value) && value > 0 ? value : 1);
+                  const raw = event.target.value;
+                  if (!raw) {
+                    setYieldQty("");
+                    return;
+                  }
+                  const value = Number(raw);
+                  setYieldQty(Number.isFinite(value) && value > 0 ? value : "");
                 }}
                 className="ui-input"
                 required

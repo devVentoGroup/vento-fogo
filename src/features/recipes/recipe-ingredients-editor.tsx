@@ -36,12 +36,29 @@ export function RecipeIngredientsEditor({
   const [lines, setLines] = useState<IngredientLine[]>(
     initialRows.length ? initialRows : [emptyLine()]
   );
-  const [search, setSearch] = useState("");
+  const [lineSearch, setLineSearch] = useState<Record<number, string>>({});
+  const [openRow, setOpenRow] = useState<number | null>(null);
 
   const productMap = useMemo(
     () => new Map(products.map((p) => [p.id, p])),
     [products]
   );
+  const productLabelById = useMemo(() => {
+    return new Map(
+      products.map((p) => [
+        p.id,
+        `${p.name ?? p.id}${p.sku ? ` (${p.sku})` : ""}`,
+      ])
+    );
+  }, [products]);
+  const productByExactLabel = useMemo(() => {
+    return new Map(
+      products.map((p) => [
+        `${p.name ?? p.id}${p.sku ? ` (${p.sku})` : ""}`,
+        p,
+      ])
+    );
+  }, [products]);
 
   const updateLine = useCallback((index: number, patch: Partial<IngredientLine>) => {
     setLines((prev) =>
@@ -61,19 +78,14 @@ export function RecipeIngredientsEditor({
       }
       return prev.filter((_, i) => i !== index);
     });
+    setLineSearch((prev) => {
+      const next = { ...prev };
+      delete next[index];
+      return next;
+    });
   }, []);
 
   const visibleLines = lines.filter((l) => !l._delete);
-
-  const filteredProducts = useMemo(() => {
-    if (!search.trim()) return products;
-    const q = search.toLowerCase();
-    return products.filter(
-      (p) =>
-        (p.name ?? "").toLowerCase().includes(q) ||
-        (p.sku ?? "").toLowerCase().includes(q)
-    );
-  }, [products, search]);
 
   const totalCost = useMemo(() => {
     let total = 0;
@@ -94,14 +106,6 @@ export function RecipeIngredientsEditor({
         </button>
       </div>
 
-      <input
-        type="text"
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        placeholder="Buscar ingrediente por nombre o SKU..."
-        className="ui-input w-full"
-      />
-
       <div className="overflow-x-auto">
         <table className="ui-table min-w-full text-sm">
           <thead>
@@ -120,24 +124,87 @@ export function RecipeIngredientsEditor({
               const product = productMap.get(line.ingredient_product_id);
               const subtotal =
                 product?.cost && line.quantity ? product.cost * line.quantity : null;
+              const currentText =
+                lineSearch[realIndex] ??
+                productLabelById.get(line.ingredient_product_id) ??
+                "";
+              const query = currentText.trim().toLowerCase();
+              const filteredProducts = !query
+                ? products.slice(0, 30)
+                : products
+                    .filter((p) => {
+                      const label = `${p.name ?? p.id}${p.sku ? ` (${p.sku})` : ""}`.toLowerCase();
+                      return label.includes(query);
+                    })
+                    .slice(0, 30);
               return (
                 <tr key={line.id ?? `new-${index}`}>
                   <td className="ui-td pr-2">
-                    <select
-                      value={line.ingredient_product_id}
-                      onChange={(e) =>
-                        updateLine(realIndex, { ingredient_product_id: e.target.value })
-                      }
-                      className="ui-input min-w-[220px]"
-                    >
-                      <option value="">Seleccionar</option>
-                      {filteredProducts.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name ?? p.id}
-                          {p.sku ? ` (${p.sku})` : ""}
-                        </option>
-                      ))}
-                    </select>
+                    <div className="relative min-w-[220px]">
+                      <input
+                        type="text"
+                        value={currentText}
+                        onFocus={() => setOpenRow(realIndex)}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          setLineSearch((prev) => ({ ...prev, [realIndex]: raw }));
+                          setOpenRow(realIndex);
+                          const exact = productByExactLabel.get(raw);
+                          if (exact) {
+                            updateLine(realIndex, { ingredient_product_id: exact.id });
+                            return;
+                          }
+                          if (!raw.trim()) {
+                            updateLine(realIndex, { ingredient_product_id: "" });
+                          }
+                        }}
+                        onBlur={() => {
+                          window.setTimeout(() => {
+                            setOpenRow((prev) => (prev === realIndex ? null : prev));
+                            setLineSearch((prev) => {
+                              const typed = (prev[realIndex] ?? "").trim();
+                              const exact = productByExactLabel.get(typed);
+                              if (exact) return prev;
+                              const selectedLabel =
+                                productLabelById.get(line.ingredient_product_id) ?? "";
+                              const next = { ...prev };
+                              next[realIndex] = selectedLabel;
+                              return next;
+                            });
+                          }, 120);
+                        }}
+                        className="ui-input"
+                        placeholder="Buscar ingrediente por nombre o SKU..."
+                      />
+                      {openRow === realIndex ? (
+                        <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-lg border border-[var(--ui-border)] bg-[var(--ui-panel)] shadow-lg">
+                          {filteredProducts.length > 0 ? (
+                            filteredProducts.map((p) => {
+                              const label = `${p.name ?? p.id}${p.sku ? ` (${p.sku})` : ""}`;
+                              return (
+                                <button
+                                  key={p.id}
+                                  type="button"
+                                  onMouseDown={(event) => {
+                                    event.preventDefault();
+                                    updateLine(realIndex, { ingredient_product_id: p.id });
+                                    setLineSearch((prev) => ({ ...prev, [realIndex]: label }));
+                                    setOpenRow(null);
+                                  }}
+                                  className="block w-full px-3 py-2 text-left text-sm hover:bg-[var(--ui-panel-soft)]"
+                                >
+                                  {label}
+                                </button>
+                              );
+                            })
+                          ) : (
+                            <div className="px-3 py-2 text-sm text-[var(--ui-muted)]">
+                              Sin coincidencias
+                            </div>
+                          )}
+                        </div>
+                      ) : null}
+                    </div>
                   </td>
                   <td className="ui-td pr-2">
                     <input

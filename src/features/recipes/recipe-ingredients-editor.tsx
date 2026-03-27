@@ -18,6 +18,14 @@ type ProductOption = {
   cost: number | null;
 };
 
+type LineMode = "purchase" | "technical";
+
+type LineTechnicalConfig = {
+  mode: LineMode;
+  factorPerUnit: number;
+  technicalUnit: "g" | "ml";
+};
+
 type Props = {
   name?: string;
   initialRows: IngredientLine[];
@@ -39,6 +47,7 @@ export function RecipeIngredientsEditor({
   );
   const [lineSearch, setLineSearch] = useState<Record<number, string>>({});
   const [openRow, setOpenRow] = useState<number | null>(null);
+  const [lineTechnical, setLineTechnical] = useState<Record<number, LineTechnicalConfig>>({});
   const [dropdownRect, setDropdownRect] = useState<{
     top: number;
     left: number;
@@ -92,18 +101,72 @@ export function RecipeIngredientsEditor({
       delete next[index];
       return next;
     });
+    setLineTechnical((prev) => {
+      const next = { ...prev };
+      delete next[index];
+      return next;
+    });
   }, []);
 
   const visibleLines = lines.filter((l) => !l._delete);
+
+  const getDefaultFactorForProduct = useCallback((product: ProductOption | undefined) => {
+    if (!product) return 1;
+    const name = String(product.name ?? "").toLowerCase();
+    if (name.includes("huevo")) return 53;
+    return 1;
+  }, []);
+
+  const getLineTechnicalConfig = useCallback(
+    (lineIndex: number, product: ProductOption | undefined): LineTechnicalConfig => {
+      return (
+        lineTechnical[lineIndex] ?? {
+          mode: "purchase",
+          factorPerUnit: getDefaultFactorForProduct(product),
+          technicalUnit: "g",
+        }
+      );
+    },
+    [getDefaultFactorForProduct, lineTechnical]
+  );
+
+  const getSavedQuantityInPurchaseUnit = useCallback(
+    (line: IngredientLine, lineIndex: number) => {
+      const product = productMap.get(line.ingredient_product_id);
+      const typedQty = Number(line.quantity ?? 0);
+      if (!product || !Number.isFinite(typedQty) || typedQty <= 0) return 0;
+      const cfg = getLineTechnicalConfig(lineIndex, product);
+      if (cfg.mode !== "technical" || String(product.unit ?? "").toLowerCase() !== "un") {
+        return typedQty;
+      }
+      const factor = Number(cfg.factorPerUnit ?? 0);
+      if (!Number.isFinite(factor) || factor <= 0) return typedQty;
+      return typedQty / factor;
+    },
+    [getLineTechnicalConfig, productMap]
+  );
+
+  const serializedLines = useMemo(() => {
+    return lines.map((line, index) => {
+      if (line._delete) return line;
+      const qtyInPurchaseUnit = getSavedQuantityInPurchaseUnit(line, index);
+      return {
+        ...line,
+        quantity: qtyInPurchaseUnit > 0 ? qtyInPurchaseUnit : undefined,
+      };
+    });
+  }, [getSavedQuantityInPurchaseUnit, lines]);
 
   const totalCost = useMemo(() => {
     let total = 0;
     for (const line of visibleLines) {
       const p = productMap.get(line.ingredient_product_id);
-      if (p?.cost && line.quantity) total += p.cost * line.quantity;
+      const lineIndex = lines.findIndex((l) => l === line);
+      const qtyInPurchaseUnit = getSavedQuantityInPurchaseUnit(line, lineIndex);
+      if (p?.cost && qtyInPurchaseUnit > 0) total += p.cost * qtyInPurchaseUnit;
     }
     return total;
-  }, [visibleLines, productMap]);
+  }, [getSavedQuantityInPurchaseUnit, lines, productMap, visibleLines]);
 
   const updateDropdownPosition = useCallback((rowIndex: number | null) => {
     if (rowIndex == null) return;
@@ -159,7 +222,7 @@ export function RecipeIngredientsEditor({
 
   return (
     <div className="space-y-3">
-      <input type="hidden" name={name} value={JSON.stringify(lines)} />
+      <input type="hidden" name={name} value={JSON.stringify(serializedLines)} />
       <div className="flex items-center justify-between">
         <span className="ui-label">Ingredientes (BOM)</span>
         <button type="button" onClick={addLine} className="ui-btn ui-btn--ghost ui-btn--sm">
@@ -167,7 +230,7 @@ export function RecipeIngredientsEditor({
         </button>
       </div>
 
-      <div className="hidden grid-cols-12 gap-2 border-b border-[var(--ui-border)] pb-2 text-xs font-semibold uppercase tracking-wide text-[var(--ui-muted)] md:grid">
+      <div className="hidden grid-cols-12 gap-3 border-b border-[var(--ui-border)] pb-2 text-xs font-semibold uppercase tracking-wide text-[var(--ui-muted)] md:grid">
         <div className="col-span-5">Ingrediente</div>
         <div className="col-span-2">Cantidad</div>
         <div className="col-span-1">Unidad</div>
@@ -179,8 +242,11 @@ export function RecipeIngredientsEditor({
         {visibleLines.map((line, index) => {
           const realIndex = lines.findIndex((l) => l === line);
           const product = productMap.get(line.ingredient_product_id);
+          const technicalConfig = getLineTechnicalConfig(realIndex, product);
+          const isTechnicalCapable = String(product?.unit ?? "").toLowerCase() === "un";
+          const qtyInPurchaseUnit = getSavedQuantityInPurchaseUnit(line, realIndex);
           const subtotal =
-            product?.cost && line.quantity ? product.cost * line.quantity : null;
+            product?.cost && qtyInPurchaseUnit > 0 ? product.cost * qtyInPurchaseUnit : null;
           const currentText =
             lineSearch[realIndex] ??
             productLabelById.get(line.ingredient_product_id) ??
@@ -188,7 +254,7 @@ export function RecipeIngredientsEditor({
           return (
             <div
               key={line.id ?? `new-${index}`}
-              className="grid grid-cols-1 gap-2 rounded-lg border border-[var(--ui-border)] p-3 md:grid-cols-12 md:items-start"
+              className="grid grid-cols-1 gap-3 rounded-lg border border-[var(--ui-border)] p-3 md:grid-cols-12 md:items-center"
             >
               <div className="md:col-span-5">
                 <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--ui-muted)] md:hidden">
@@ -242,6 +308,27 @@ export function RecipeIngredientsEditor({
                 <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--ui-muted)] md:hidden">
                   Cantidad
                 </div>
+                {isTechnicalCapable ? (
+                  <div className="mb-1">
+                    <select
+                      value={technicalConfig.mode}
+                      onChange={(event) => {
+                        const nextMode = (event.target.value as LineMode) || "purchase";
+                        setLineTechnical((prev) => ({
+                          ...prev,
+                          [realIndex]: {
+                            ...technicalConfig,
+                            mode: nextMode,
+                          },
+                        }));
+                      }}
+                      className="ui-input !h-9 !py-1 text-xs"
+                    >
+                      <option value="purchase">Compra (un)</option>
+                      <option value="technical">Tecnica ({technicalConfig.technicalUnit})</option>
+                    </select>
+                  </div>
+                ) : null}
                 <input
                   type="number"
                   step="0.001"
@@ -255,26 +342,69 @@ export function RecipeIngredientsEditor({
                   className="ui-input"
                   placeholder="0"
                 />
+                {isTechnicalCapable && technicalConfig.mode === "technical" ? (
+                  <div className="mt-1 grid grid-cols-[1fr_auto_auto] items-center gap-2">
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      value={technicalConfig.factorPerUnit}
+                      onChange={(event) => {
+                        const nextFactor = Number(event.target.value);
+                        setLineTechnical((prev) => ({
+                          ...prev,
+                          [realIndex]: {
+                            ...technicalConfig,
+                            factorPerUnit: Number.isFinite(nextFactor) && nextFactor > 0 ? nextFactor : 1,
+                          },
+                        }));
+                      }}
+                      className="ui-input !h-9 !py-1 text-xs"
+                    />
+                    <span className="text-xs text-[var(--ui-muted)]">
+                      {technicalConfig.technicalUnit}/un
+                    </span>
+                    <select
+                      value={technicalConfig.technicalUnit}
+                      onChange={(event) => {
+                        const nextUnit = event.target.value === "ml" ? "ml" : "g";
+                        setLineTechnical((prev) => ({
+                          ...prev,
+                          [realIndex]: {
+                            ...technicalConfig,
+                            technicalUnit: nextUnit,
+                          },
+                        }));
+                      }}
+                      className="ui-input !h-9 !py-1 text-xs"
+                    >
+                      <option value="g">g</option>
+                      <option value="ml">ml</option>
+                    </select>
+                  </div>
+                ) : null}
               </div>
-              <div className="md:col-span-1 flex items-center text-sm text-[var(--ui-muted)]">
+              <div className="md:col-span-1 flex min-h-11 items-center text-sm text-[var(--ui-muted)]">
                 <div className="mr-2 text-xs font-semibold uppercase tracking-wide text-[var(--ui-muted)] md:hidden">
                   Unidad
                 </div>
-                {product?.unit ?? "-"}
+                {isTechnicalCapable && technicalConfig.mode === "technical"
+                  ? `${technicalConfig.technicalUnit} (receta)`
+                  : product?.unit ?? "-"}
               </div>
-              <div className="md:col-span-2 flex items-center text-sm font-mono text-[var(--ui-muted)]">
+              <div className="md:col-span-2 flex min-h-11 items-center text-sm font-mono text-[var(--ui-muted)]">
                 <div className="mr-2 text-xs font-semibold uppercase tracking-wide text-[var(--ui-muted)] md:hidden">
                   Costo unit.
                 </div>
                 {product?.cost != null ? `$${product.cost.toLocaleString("es-CO")}` : "-"}
               </div>
-              <div className="md:col-span-1 flex items-center text-sm font-mono font-semibold text-[var(--ui-text)]">
+              <div className="md:col-span-1 flex min-h-11 items-center text-sm font-mono font-semibold text-[var(--ui-text)]">
                 <div className="mr-2 text-xs font-semibold uppercase tracking-wide text-[var(--ui-muted)] md:hidden">
                   Subtotal
                 </div>
                 {subtotal != null ? `$${subtotal.toLocaleString("es-CO")}` : "-"}
               </div>
-              <div className="md:col-span-1 flex md:justify-end">
+              <div className="md:col-span-1 flex items-center md:justify-end">
                 <div className="mr-2 self-center text-xs font-semibold uppercase tracking-wide text-[var(--ui-muted)] md:hidden">
                   Accion
                 </div>
@@ -286,6 +416,16 @@ export function RecipeIngredientsEditor({
                   Quitar
                 </button>
               </div>
+              {isTechnicalCapable && technicalConfig.mode === "technical" ? (
+                <div className="md:col-span-12 -mt-1 text-xs text-[var(--ui-muted)]">
+                  Se guarda como{" "}
+                  <strong className="text-[var(--ui-text)]">
+                    {qtyInPurchaseUnit > 0 ? qtyInPurchaseUnit.toLocaleString("es-CO", { maximumFractionDigits: 4 }) : "0"} un
+                  </strong>{" "}
+                  ({technicalConfig.factorPerUnit.toLocaleString("es-CO", { maximumFractionDigits: 2 })}{" "}
+                  {technicalConfig.technicalUnit} = 1 un).
+                </div>
+              ) : null}
             </div>
           );
         })}

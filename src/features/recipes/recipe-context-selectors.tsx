@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useMemo, useState } from "react";
+import { usePathname, useSearchParams } from "next/navigation";
 
 type SiteOption = {
   id: string;
@@ -48,21 +48,16 @@ export function RecipeContextSelectors({
   products,
   recipeCards,
 }: Props) {
-  const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const [isPending, startTransition] = useTransition();
-
-  const [siteId, setSiteId] = useState(initialSiteId);
-  const [productId, setProductId] = useState(initialProductId);
+  const [isNavigating, setIsNavigating] = useState(false);
   const recipeProductSet = useMemo(() => new Set(recipeCards.map((card) => card.product_id)), [recipeCards]);
 
   const navigate = (nextSiteId: string, nextProductId: string) => {
     const params = new URLSearchParams(searchParams?.toString() ?? "");
     const target = buildUrl(pathname || "/recipes/new", params, nextSiteId, nextProductId, source || "fogo");
-    startTransition(() => {
-      router.replace(target);
-    });
+    setIsNavigating(true);
+    window.location.assign(target);
   };
 
   return (
@@ -71,14 +66,13 @@ export function RecipeContextSelectors({
         <span className="ui-label">Sede de receta</span>
         <select
           name="site_id"
-          value={siteId}
+          value={initialSiteId}
           onChange={(event) => {
             const nextSiteId = event.target.value;
-            setSiteId(nextSiteId);
-            navigate(nextSiteId, productId);
+            navigate(nextSiteId, initialProductId);
           }}
           className="ui-input"
-          disabled={isPending}
+          disabled={isNavigating}
         >
           <option value="">Sin sede</option>
           {sites.map((site) => (
@@ -93,15 +87,14 @@ export function RecipeContextSelectors({
         <span className="ui-label">Producto</span>
         <select
           name="product_id"
-          value={productId}
+          value={initialProductId}
           onChange={(event) => {
             const nextProductId = event.target.value;
-            setProductId(nextProductId);
-            navigate(siteId, nextProductId);
+            navigate(initialSiteId, nextProductId);
           }}
           className="ui-input"
           required
-          disabled={isPending}
+          disabled={isNavigating}
         >
           <option value="">Selecciona un producto</option>
           {products.map((product) => {
@@ -121,4 +114,3 @@ export function RecipeContextSelectors({
     </div>
   );
 }
-

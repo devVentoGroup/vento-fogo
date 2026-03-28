@@ -588,6 +588,7 @@ export default async function NewRecipePage({
         </section>
 
         <RecipeBaseFields
+          key={`base-${selectedProductId}-${selectedRecipeCard?.id ?? "new"}`}
           initialYieldQty={selectedRecipeCard?.yield_qty ?? 1}
           initialYieldUnit={defaultYieldUnit}
           initialPortionSize={selectedRecipeCard?.portion_size ?? null}
@@ -607,6 +608,7 @@ export default async function NewRecipePage({
         <section className="ui-panel space-y-4">
           <h2 className="ui-h2">Ingredientes (BOM)</h2>
           <RecipeIngredientsEditor
+            key={`bom-${selectedProductId}-${selectedRecipeCard?.id ?? "new"}`}
             initialRows={initialIngredientLines}
             products={ingredientOptions}
           />
@@ -614,7 +616,10 @@ export default async function NewRecipePage({
 
         <section className="ui-panel space-y-4">
           <h2 className="ui-h2">Pasos de preparacion</h2>
-          <RecipeStepsEditor initialRows={initialSteps} />
+          <RecipeStepsEditor
+            key={`steps-${selectedProductId}-${selectedRecipeCard?.id ?? "new"}`}
+            initialRows={initialSteps}
+          />
         </section>
 
         <section className="ui-mobile-sticky-footer">

@@ -10,6 +10,7 @@ import {
   RecipeStepsEditor,
   type RecipeStepLine,
 } from "@/features/recipes/recipe-steps-editor";
+import { RecipeContextSelectors } from "@/features/recipes/recipe-context-selectors";
 
 export const dynamic = "force-dynamic";
 
@@ -358,10 +359,12 @@ async function saveRecipe(formData: FormData) {
   }
 
   const qs = new URLSearchParams();
-  if (siteId) qs.set("site_id", siteId);
-  qs.set("product_id", productId);
   qs.set("saved", "1");
-  if (source) qs.set("source", source);
+  if (source === "nexo") {
+    if (siteId) qs.set("site_id", siteId);
+    qs.set("product_id", productId);
+    qs.set("source", source);
+  }
   redirect(`/recipes?${qs.toString()}`);
 }
 
@@ -546,42 +549,19 @@ export default async function NewRecipePage({
         <section className="ui-panel space-y-5">
           <div className="grid gap-4 md:grid-cols-2">
             <input type="hidden" name="source" value={source || "fogo"} />
-
-            <label className="flex flex-col gap-1">
-              <span className="ui-label">Sede de receta</span>
-              <select name="site_id" defaultValue={selectedRecipeCard?.site_id ?? resolvedSiteId} className="ui-input">
-                <option value="">Sin sede</option>
-                {sites.map((site) => (
-                  <option key={site.id} value={site.id}>
-                    {site.name ?? site.id}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="flex flex-col gap-1 md:col-span-2">
-              <span className="ui-label">Producto</span>
-              <select
-                name="product_id"
-                defaultValue={selectedProductId}
-                className="ui-input"
-                required
-              >
-                <option value="">Selecciona un producto</option>
-                {products.map((product) => {
-                  const hasRecipe = recipeCards.some((card) => card.product_id === product.id);
-                  return (
-                    <option key={product.id} value={product.id}>
-                      {product.name ?? "Producto"} ({product.sku ?? "-"}) - {product.product_type ?? "n/a"}
-                      {hasRecipe ? " - con receta" : ""}
-                    </option>
-                  );
-                })}
-              </select>
-              <span className="text-xs text-[var(--ui-muted)]">
-                Si eliges un producto con receta existente, este formulario actualiza la receta actual.
-              </span>
-            </label>
+            <RecipeContextSelectors
+              initialSiteId={selectedRecipeCard?.site_id ?? resolvedSiteId}
+              initialProductId={selectedProductId}
+              source={source || "fogo"}
+              sites={sites.map((site) => ({ id: site.id, name: site.name }))}
+              products={products.map((product) => ({
+                id: product.id,
+                name: product.name,
+                sku: product.sku,
+                product_type: product.product_type,
+              }))}
+              recipeCards={recipeCards.map((card) => ({ product_id: card.product_id }))}
+            />
 
             <label className="flex flex-col gap-1">
               <span className="ui-label">Estado</span>

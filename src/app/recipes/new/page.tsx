@@ -361,7 +361,6 @@ async function saveRecipe(formData: FormData) {
   const qs = new URLSearchParams();
   qs.set("saved", "1");
   if (source === "nexo") {
-    if (siteId) qs.set("site_id", siteId);
     qs.set("product_id", productId);
     qs.set("source", source);
   }

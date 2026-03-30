@@ -19,6 +19,10 @@ type RecipeCardRow = {
   updated_at: string;
   products?: ProductShape | ProductShape[] | null;
 };
+type LegacyRecipeRow = {
+  product_id: string;
+  updated_at?: string | null;
+};
 
 type FocusProductRow = {
   id: string;
@@ -91,6 +95,54 @@ export default async function RecipesPage({
 
   const { data: recipeCardsData } = await query;
   const recipeCards = ((recipeCardsData ?? []) as unknown[]) as RecipeCardRow[];
+
+  // Compatibilidad: recetas antiguas que existen en "recipes" pero no tienen "recipe_cards".
+  const { data: legacyRowsData } = await supabase
+    .from("recipes")
+    .select("product_id,updated_at")
+    .eq("is_active", true)
+    .limit(5000);
+  const legacyRows = ((legacyRowsData ?? []) as unknown[]) as LegacyRecipeRow[];
+  const cardProductIds = new Set(recipeCards.map((row) => row.product_id));
+  const legacyOnlyProductIds = Array.from(
+    new Set(
+      legacyRows
+        .map((row) => String(row.product_id ?? "").trim())
+        .filter((pid) => pid && !cardProductIds.has(pid))
+    )
+  );
+
+  let legacyProductMap = new Map<string, ProductShape>();
+  if (legacyOnlyProductIds.length > 0) {
+    const { data: legacyProductsData } = await supabase
+      .from("products")
+      .select("id,name,sku,unit")
+      .in("id", legacyOnlyProductIds);
+    legacyProductMap = new Map(
+      (((legacyProductsData ?? []) as Array<{ id: string; name: string | null; sku: string | null; unit: string | null }>) ?? [])
+        .map((row) => [row.id, { name: row.name, sku: row.sku, unit: row.unit }])
+    );
+  }
+
+  const legacyRecipeCards: RecipeCardRow[] = legacyOnlyProductIds.map((pid) => {
+    const lastUpdated =
+      legacyRows
+        .filter((row) => row.product_id === pid)
+        .map((row) => String(row.updated_at ?? ""))
+        .sort((a, b) => b.localeCompare(a))[0] || new Date(0).toISOString();
+    return {
+      id: `legacy:${pid}`,
+      product_id: pid,
+      yield_qty: 0,
+      yield_unit: legacyProductMap.get(pid)?.unit ?? "-",
+      status: "draft",
+      updated_at: lastUpdated,
+      products: legacyProductMap.get(pid) ?? null,
+    };
+  });
+  const allRecipeCards = [...recipeCards, ...legacyRecipeCards].sort((a, b) =>
+    String(b.updated_at ?? "").localeCompare(String(a.updated_at ?? ""))
+  );
   const focusedRecipeCard = productId ? recipeCards.find((row) => row.product_id === productId) ?? null : null;
 
   let focusedProduct: FocusProductRow | null = null;
@@ -112,7 +164,7 @@ export default async function RecipesPage({
     existingRecipeForFocusedProduct = (existingCardData as { id: string; status: string; site_id: string | null } | null) ?? null;
   }
 
-  const productIds = Array.from(new Set(recipeCards.map((r) => r.product_id)));
+  const productIds = Array.from(new Set(allRecipeCards.map((r) => r.product_id)));
   const recipeCardIds = recipeCards.map((r) => r.id);
 
   const [{ data: ingredientRows }, { data: stepRows }] = await Promise.all([
@@ -141,8 +193,8 @@ export default async function RecipesPage({
     stepsByCard.set(row.recipe_card_id, (stepsByCard.get(row.recipe_card_id) ?? 0) + 1);
   }
 
-  const published = recipeCards.filter((r) => r.status === "published").length;
-  const draft = recipeCards.filter((r) => r.status === "draft").length;
+  const published = allRecipeCards.filter((r) => r.status === "published").length;
+  const draft = allRecipeCards.filter((r) => r.status === "draft").length;
 
   return (
     <div className="space-y-6">
@@ -196,7 +248,7 @@ export default async function RecipesPage({
         <div className="mt-4 grid gap-3 sm:grid-cols-3">
           <div className="ui-panel-soft">
             <div className="ui-label">Total recetas</div>
-            <div className="mt-1 ui-h2">{recipeCards.length}</div>
+            <div className="mt-1 ui-h2">{allRecipeCards.length}</div>
           </div>
           <div className="ui-panel-soft">
             <div className="ui-label">Publicadas</div>
@@ -237,9 +289,9 @@ export default async function RecipesPage({
               </tr>
             </thead>
             <tbody>
-              {recipeCards.map((row) => {
+              {allRecipeCards.map((row) => {
                 const ingredient = ingredientByProduct.get(row.product_id) ?? { lines: 0, qty: 0 };
-                const steps = stepsByCard.get(row.id) ?? 0;
+                const steps = row.id.startsWith("legacy:") ? 0 : (stepsByCard.get(row.id) ?? 0);
                 const product = resolveProduct(row.products);
                 const productName = product?.name || "Producto";
                 const sku = product?.sku || "-";
@@ -272,7 +324,7 @@ export default async function RecipesPage({
                   </tr>
                 );
               })}
-              {recipeCards.length === 0 ? (
+              {allRecipeCards.length === 0 ? (
                 <tr>
                   <td className="ui-td ui-empty" colSpan={8}>
                     {focusedRecipeCard

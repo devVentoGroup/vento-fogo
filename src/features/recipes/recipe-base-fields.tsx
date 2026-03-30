@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type UnitOption = {
   code: string;
@@ -130,6 +130,21 @@ export function RecipeBaseFields({
     )} porciones.`;
   }, [yieldReady, normalizedYieldQty, yieldUnit, portionReady, normalizedPortionSize, portionUnit, portionsCount]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.dispatchEvent(
+      new CustomEvent("recipe-base-fields-change", {
+        detail: {
+          yieldQty: normalizedYieldQty,
+          yieldUnit,
+          portionSize: normalizedPortionSize,
+          portionUnit,
+          portionsCount: portionsCount ?? null,
+        },
+      })
+    );
+  }, [normalizedYieldQty, yieldUnit, normalizedPortionSize, portionUnit, portionsCount]);
+
   return (
     <section className="ui-panel space-y-4">
       <h2 className="ui-h2">Ficha base</h2>
@@ -172,6 +187,7 @@ export function RecipeBaseFields({
                 className="ui-input"
                 required
               />
+              <input type="hidden" name="yield_qty_snapshot" value={normalizedYieldQty > 0 ? String(normalizedYieldQty) : ""} />
               <span className="text-xs text-[var(--ui-muted)]">Ejemplo: 109</span>
             </label>
             <label className="flex flex-col gap-1">
@@ -226,6 +242,8 @@ export function RecipeBaseFields({
                   }
                   className="ui-input"
                 />
+                <input type="hidden" name="portion_size_snapshot" value={normalizedPortionSize > 0 ? String(normalizedPortionSize) : ""} />
+                <input type="hidden" name="portion_count_estimate" value={portionsCount != null ? String(portionsCount) : ""} />
                 <span className="text-xs text-[var(--ui-muted)]">Ejemplo: 120</span>
               </label>
               <label className="flex flex-col gap-1">

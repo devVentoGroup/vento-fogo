@@ -32,6 +32,11 @@ type Props = {
   products: ProductOption[];
 };
 
+type RecipeBaseSnapshot = {
+  portionsCount: number | null;
+  portionUnit: string | null;
+};
+
 const emptyLine = (): IngredientLine => ({
   ingredient_product_id: "",
   quantity: undefined,
@@ -53,6 +58,10 @@ export function RecipeIngredientsEditor({
     left: number;
     width: number;
   } | null>(null);
+  const [recipeBase, setRecipeBase] = useState<RecipeBaseSnapshot>({
+    portionsCount: null,
+    portionUnit: null,
+  });
   const inputRefs = useRef<Record<number, HTMLInputElement | null>>({});
   const dropdownRef = useRef<HTMLDivElement | null>(null);
 
@@ -228,6 +237,54 @@ export function RecipeIngredientsEditor({
     window.addEventListener("mousedown", handlePointerDown);
     return () => window.removeEventListener("mousedown", handlePointerDown);
   }, [openRow]);
+
+  useEffect(() => {
+    const applySnapshot = (detail: {
+      portionsCount?: number | null;
+      portionUnit?: string | null;
+    } | null | undefined) => {
+      const portions = Number(detail?.portionsCount ?? 0);
+      const portionUnit = String(detail?.portionUnit ?? "").trim();
+      setRecipeBase({
+        portionsCount: Number.isFinite(portions) && portions > 0 ? portions : null,
+        portionUnit: portionUnit || null,
+      });
+    };
+
+    const onBaseChange = (event: Event) => {
+      const custom = event as CustomEvent<{
+        portionsCount?: number | null;
+        portionUnit?: string | null;
+      }>;
+      applySnapshot(custom.detail);
+    };
+
+    window.addEventListener("recipe-base-fields-change", onBaseChange as EventListener);
+
+    const portionsFromDom = Number(
+      (
+        document.querySelector<HTMLInputElement>('input[name="portion_count_estimate"]')?.value ??
+        ""
+      ).trim()
+    );
+    const portionUnitFromDom = (
+      document.querySelector<HTMLSelectElement>('select[name="portion_unit"]')?.value ??
+      ""
+    ).trim();
+    applySnapshot({
+      portionsCount: Number.isFinite(portionsFromDom) && portionsFromDom > 0 ? portionsFromDom : null,
+      portionUnit: portionUnitFromDom || null,
+    });
+
+    return () => {
+      window.removeEventListener("recipe-base-fields-change", onBaseChange as EventListener);
+    };
+  }, []);
+
+  const estimatedCostPerPortion = useMemo(() => {
+    if (!(totalCost > 0) || !recipeBase.portionsCount || recipeBase.portionsCount <= 0) return null;
+    return totalCost / recipeBase.portionsCount;
+  }, [recipeBase.portionsCount, totalCost]);
 
   return (
     <div className="space-y-3">
@@ -443,11 +500,26 @@ export function RecipeIngredientsEditor({
         ) : null}
       </div>
       {totalCost > 0 ? (
-        <div className="mt-2 flex items-center justify-between border-t border-[var(--ui-border)] pt-3">
-          <span className="font-semibold text-[var(--ui-text)]">Costo total estimado</span>
-          <span className="font-mono font-semibold text-[var(--ui-text)]">
-            ${totalCost.toLocaleString("es-CO")}
-          </span>
+        <div className="mt-2 space-y-2 border-t border-[var(--ui-border)] pt-3">
+          <div className="flex items-center justify-between">
+            <span className="font-semibold text-[var(--ui-text)]">Costo total estimado</span>
+            <span className="font-mono font-semibold text-[var(--ui-text)]">
+              ${totalCost.toLocaleString("es-CO")}
+            </span>
+          </div>
+          {estimatedCostPerPortion != null ? (
+            <div className="flex items-center justify-between">
+              <span className="font-semibold text-[var(--ui-text)]">
+                Costo estimado por porción
+                {recipeBase.portionUnit ? (
+                  <span className="ml-1 text-[var(--ui-muted)]">({recipeBase.portionUnit})</span>
+                ) : null}
+              </span>
+              <span className="font-mono font-semibold text-[var(--ui-text)]">
+                ${estimatedCostPerPortion.toLocaleString("es-CO", { maximumFractionDigits: 2 })}
+              </span>
+            </div>
+          ) : null}
         </div>
       ) : null}
       {typeof document !== "undefined" && openRow != null && dropdownRect

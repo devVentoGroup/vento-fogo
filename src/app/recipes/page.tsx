@@ -67,6 +67,7 @@ export default async function RecipesPage({
     created?: string;
     saved?: string;
     error?: string;
+    q?: string;
   }>;
 }) {
   const sp = (await searchParams) ?? {};
@@ -76,6 +77,7 @@ export default async function RecipesPage({
   const created = String(sp.created ?? "").trim() === "1";
   const saved = String(sp.saved ?? "").trim() === "1";
   const error = String(sp.error ?? "").trim();
+  const searchTerm = String(sp.q ?? "").trim().toLowerCase();
 
   const { supabase } = await requireAppAccess({
     appId: APP_ID,
@@ -193,8 +195,15 @@ export default async function RecipesPage({
     stepsByCard.set(row.recipe_card_id, (stepsByCard.get(row.recipe_card_id) ?? 0) + 1);
   }
 
-  const published = allRecipeCards.filter((r) => r.status === "published").length;
-  const draft = allRecipeCards.filter((r) => r.status === "draft").length;
+  const filteredRecipeCards = allRecipeCards.filter((row) => {
+    if (!searchTerm) return true;
+    const product = resolveProduct(row.products);
+    const name = String(product?.name ?? "").toLowerCase();
+    return name.includes(searchTerm);
+  });
+
+  const published = filteredRecipeCards.filter((r) => r.status === "published").length;
+  const draft = filteredRecipeCards.filter((r) => r.status === "draft").length;
 
   return (
     <div className="space-y-6">
@@ -248,7 +257,7 @@ export default async function RecipesPage({
         <div className="mt-4 grid gap-3 sm:grid-cols-3">
           <div className="ui-panel-soft">
             <div className="ui-label">Total recetas</div>
-            <div className="mt-1 ui-h2">{allRecipeCards.length}</div>
+            <div className="mt-1 ui-h2">{filteredRecipeCards.length}</div>
           </div>
           <div className="ui-panel-soft">
             <div className="ui-label">Publicadas</div>
@@ -273,6 +282,30 @@ export default async function RecipesPage({
             Abrir catalogo en NEXO
           </a>
         </div>
+        <form className="mb-4 flex flex-wrap items-end gap-2">
+          <label className="min-w-[260px] flex-1">
+            <span className="ui-label">Buscar por nombre</span>
+            <input
+              type="text"
+              name="q"
+              defaultValue={String(sp.q ?? "")}
+              placeholder="Ej: galleta, pulled pork, cebolla..."
+              className="ui-input"
+            />
+          </label>
+          {siteId ? <input type="hidden" name="site_id" value={siteId} /> : null}
+          {productId ? <input type="hidden" name="product_id" value={productId} /> : null}
+          {source ? <input type="hidden" name="source" value={source} /> : null}
+          <button type="submit" className="ui-btn ui-btn--brand ui-btn--sm">
+            Buscar
+          </button>
+          <Link
+            href={siteId ? `/recipes?site_id=${encodeURIComponent(siteId)}` : "/recipes"}
+            className="ui-btn ui-btn--ghost ui-btn--sm"
+          >
+            Limpiar
+          </Link>
+        </form>
 
         <div className="overflow-x-auto">
           <table className="ui-table min-w-[920px]">
@@ -289,7 +322,7 @@ export default async function RecipesPage({
               </tr>
             </thead>
             <tbody>
-              {allRecipeCards.map((row) => {
+              {filteredRecipeCards.map((row) => {
                 const ingredient = ingredientByProduct.get(row.product_id) ?? { lines: 0, qty: 0 };
                 const steps = row.id.startsWith("legacy:") ? 0 : (stepsByCard.get(row.id) ?? 0);
                 const product = resolveProduct(row.products);
@@ -324,12 +357,14 @@ export default async function RecipesPage({
                   </tr>
                 );
               })}
-              {allRecipeCards.length === 0 ? (
+              {filteredRecipeCards.length === 0 ? (
                 <tr>
                   <td className="ui-td ui-empty" colSpan={8}>
-                    {focusedRecipeCard
-                      ? "No se encontro la receta en la sede activa. Cambia de sede para verla."
-                      : "No hay recetas para la sede activa."}
+                    {searchTerm
+                      ? "No hay recetas que coincidan con ese nombre."
+                      : focusedRecipeCard
+                        ? "No se encontro la receta en la sede activa. Cambia de sede para verla."
+                        : "No hay recetas para la sede activa."}
                   </td>
                 </tr>
               ) : null}

@@ -18,8 +18,29 @@ type RecipeBaseFieldsProps = {
   initialShelfLifeDays: number | null;
   initialDifficulty: string | null;
   initialDescription: string | null;
+  initialProcessConfig?: Record<string, unknown> | null;
   units: UnitOption[];
   nexoCatalogUrl?: string;
+};
+
+type RecipeProcessConfig = {
+  vacuumPackaging?: boolean;
+  controlledCook?: boolean;
+  specialStorage?: boolean;
+  specialLabeling?: boolean;
+  packagingMethod?: string;
+  vacuumLevel?: string;
+  sealRange?: string;
+  bagType?: string;
+  unitsPerPack?: number | "";
+  cookTemperatureC?: number | "";
+  cookTimeMinutes?: number | "";
+  cookEquipment?: string;
+  targetInternalTempC?: number | "";
+  storageCondition?: string;
+  storageTemperatureC?: number | "";
+  labelNotes?: string;
+  processNotes?: string;
 };
 
 function normalizeUnitCode(value: string | null | undefined) {
@@ -46,6 +67,7 @@ export function RecipeBaseFields({
   initialShelfLifeDays,
   initialDifficulty,
   initialDescription,
+  initialProcessConfig,
   units,
   nexoCatalogUrl,
 }: RecipeBaseFieldsProps) {
@@ -63,6 +85,32 @@ export function RecipeBaseFields({
   );
   const [difficulty, setDifficulty] = useState<string>(String(initialDifficulty ?? ""));
   const [description, setDescription] = useState<string>(String(initialDescription ?? ""));
+  const [processConfig, setProcessConfig] = useState<RecipeProcessConfig>(() => {
+    const source = initialProcessConfig ?? {};
+    const asNumberOrEmpty = (value: unknown) => {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : "";
+    };
+    return {
+      vacuumPackaging: source.vacuumPackaging === true,
+      controlledCook: source.controlledCook === true,
+      specialStorage: source.specialStorage === true,
+      specialLabeling: source.specialLabeling === true,
+      packagingMethod: String(source.packagingMethod ?? ""),
+      vacuumLevel: String(source.vacuumLevel ?? ""),
+      sealRange: String(source.sealRange ?? ""),
+      bagType: String(source.bagType ?? ""),
+      unitsPerPack: asNumberOrEmpty(source.unitsPerPack),
+      cookTemperatureC: asNumberOrEmpty(source.cookTemperatureC),
+      cookTimeMinutes: asNumberOrEmpty(source.cookTimeMinutes),
+      cookEquipment: String(source.cookEquipment ?? ""),
+      targetInternalTempC: asNumberOrEmpty(source.targetInternalTempC),
+      storageCondition: String(source.storageCondition ?? ""),
+      storageTemperatureC: asNumberOrEmpty(source.storageTemperatureC),
+      labelNotes: String(source.labelNotes ?? ""),
+      processNotes: String(source.processNotes ?? ""),
+    };
+  });
 
   const unitMap = useMemo(() => {
     return new Map(units.map((unit) => [normalizeUnitCode(unit.code), unit]));
@@ -279,6 +327,40 @@ export function RecipeBaseFields({
         <summary className="cursor-pointer text-sm font-semibold text-[var(--ui-text)]">
           Configuracion avanzada (opcional)
         </summary>
+        <input
+          type="hidden"
+          name="process_config"
+          value={JSON.stringify({
+            vacuumPackaging: processConfig.vacuumPackaging === true,
+            controlledCook: processConfig.controlledCook === true,
+            specialStorage: processConfig.specialStorage === true,
+            specialLabeling: processConfig.specialLabeling === true,
+            packagingMethod: String(processConfig.packagingMethod ?? "").trim() || null,
+            vacuumLevel: String(processConfig.vacuumLevel ?? "").trim() || null,
+            sealRange: String(processConfig.sealRange ?? "").trim() || null,
+            bagType: String(processConfig.bagType ?? "").trim() || null,
+            unitsPerPack:
+              typeof processConfig.unitsPerPack === "number" && processConfig.unitsPerPack > 0
+                ? processConfig.unitsPerPack
+                : null,
+            cookTemperatureC:
+              typeof processConfig.cookTemperatureC === "number" ? processConfig.cookTemperatureC : null,
+            cookTimeMinutes:
+              typeof processConfig.cookTimeMinutes === "number" ? processConfig.cookTimeMinutes : null,
+            cookEquipment: String(processConfig.cookEquipment ?? "").trim() || null,
+            targetInternalTempC:
+              typeof processConfig.targetInternalTempC === "number"
+                ? processConfig.targetInternalTempC
+                : null,
+            storageCondition: String(processConfig.storageCondition ?? "").trim() || null,
+            storageTemperatureC:
+              typeof processConfig.storageTemperatureC === "number"
+                ? processConfig.storageTemperatureC
+                : null,
+            labelNotes: String(processConfig.labelNotes ?? "").trim() || null,
+            processNotes: String(processConfig.processNotes ?? "").trim() || null,
+          })}
+        />
         <div className="mt-3 grid gap-4 md:grid-cols-2">
           <div className="rounded-xl border border-[var(--ui-border)] p-3">
             <div className="text-xs font-semibold uppercase tracking-wide text-[var(--ui-muted)]">Paso 3</div>
@@ -349,6 +431,283 @@ export function RecipeBaseFields({
               </p>
             ) : null}
           </div>
+        </div>
+
+        <div className="mt-4 rounded-xl border border-[var(--ui-border)] p-4">
+          <div className="text-xs font-semibold uppercase tracking-wide text-[var(--ui-muted)]">
+            Proceso tecnico
+          </div>
+          <p className="mt-1 text-sm text-[var(--ui-muted)]">
+            Activa solo lo que aplique. Cada bloque abre sus parametros cuando el proceso lo necesita.
+          </p>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <label className="ui-check-card">
+              <input
+                type="checkbox"
+                checked={processConfig.vacuumPackaging === true}
+                onChange={(event) =>
+                  setProcessConfig((current) => ({ ...current, vacuumPackaging: event.target.checked }))
+                }
+              />
+              <div>
+                <div className="text-sm font-semibold text-[var(--ui-text)]">Se empaca al vacio</div>
+                <div className="text-xs text-[var(--ui-muted)]">Muestra vacio, sellado, bolsa y unidades por empaque.</div>
+              </div>
+            </label>
+
+            <label className="ui-check-card">
+              <input
+                type="checkbox"
+                checked={processConfig.controlledCook === true}
+                onChange={(event) =>
+                  setProcessConfig((current) => ({ ...current, controlledCook: event.target.checked }))
+                }
+              />
+              <div>
+                <div className="text-sm font-semibold text-[var(--ui-text)]">Requiere coccion controlada</div>
+                <div className="text-xs text-[var(--ui-muted)]">Muestra temperatura, tiempo, equipo y meta interna si aplica.</div>
+              </div>
+            </label>
+
+            <label className="ui-check-card">
+              <input
+                type="checkbox"
+                checked={processConfig.specialStorage === true}
+                onChange={(event) =>
+                  setProcessConfig((current) => ({ ...current, specialStorage: event.target.checked }))
+                }
+              />
+              <div>
+                <div className="text-sm font-semibold text-[var(--ui-text)]">Tiene conservacion especial</div>
+                <div className="text-xs text-[var(--ui-muted)]">Muestra condicion y temperatura de almacenamiento.</div>
+              </div>
+            </label>
+
+            <label className="ui-check-card">
+              <input
+                type="checkbox"
+                checked={processConfig.specialLabeling === true}
+                onChange={(event) =>
+                  setProcessConfig((current) => ({ ...current, specialLabeling: event.target.checked }))
+                }
+              />
+              <div>
+                <div className="text-sm font-semibold text-[var(--ui-text)]">Lleva etiquetado especial</div>
+                <div className="text-xs text-[var(--ui-muted)]">Muestra notas operativas para empaque y etiqueta.</div>
+              </div>
+            </label>
+          </div>
+
+          {processConfig.vacuumPackaging ? (
+            <div className="mt-4 rounded-xl border border-[var(--ui-border)] p-3">
+              <div className="text-sm font-semibold text-[var(--ui-text)]">Empaque al vacio</div>
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                <label className="flex flex-col gap-1">
+                  <span className="ui-label">Metodo de empaque</span>
+                  <input
+                    className="ui-input"
+                    value={processConfig.packagingMethod ?? ""}
+                    onChange={(event) =>
+                      setProcessConfig((current) => ({ ...current, packagingMethod: event.target.value }))
+                    }
+                    placeholder="Ej: vacio"
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="ui-label">Nivel de vacio</span>
+                  <input
+                    className="ui-input"
+                    value={processConfig.vacuumLevel ?? ""}
+                    onChange={(event) =>
+                      setProcessConfig((current) => ({ ...current, vacuumLevel: event.target.value }))
+                    }
+                    placeholder="Ej: 40"
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="ui-label">Rango de sellado</span>
+                  <input
+                    className="ui-input"
+                    value={processConfig.sealRange ?? ""}
+                    onChange={(event) =>
+                      setProcessConfig((current) => ({ ...current, sealRange: event.target.value }))
+                    }
+                    placeholder="Ej: 1.5 - 2.0"
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="ui-label">Tipo de bolsa</span>
+                  <input
+                    className="ui-input"
+                    value={processConfig.bagType ?? ""}
+                    onChange={(event) =>
+                      setProcessConfig((current) => ({ ...current, bagType: event.target.value }))
+                    }
+                    placeholder="Ej: bolsa lisa 250 micras"
+                  />
+                </label>
+                <label className="flex flex-col gap-1 md:col-span-2">
+                  <span className="ui-label">Unidades por empaque</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    className="ui-input"
+                    value={processConfig.unitsPerPack ?? ""}
+                    onChange={(event) =>
+                      setProcessConfig((current) => ({
+                        ...current,
+                        unitsPerPack: event.target.value ? Number(event.target.value) : "",
+                      }))
+                    }
+                    placeholder="Ej: 4"
+                  />
+                </label>
+              </div>
+            </div>
+          ) : null}
+
+          {processConfig.controlledCook ? (
+            <div className="mt-4 rounded-xl border border-[var(--ui-border)] p-3">
+              <div className="text-sm font-semibold text-[var(--ui-text)]">Coccion controlada</div>
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                <label className="flex flex-col gap-1">
+                  <span className="ui-label">Temperatura (C)</span>
+                  <input
+                    type="number"
+                    step="0.1"
+                    className="ui-input"
+                    value={processConfig.cookTemperatureC ?? ""}
+                    onChange={(event) =>
+                      setProcessConfig((current) => ({
+                        ...current,
+                        cookTemperatureC: event.target.value ? Number(event.target.value) : "",
+                      }))
+                    }
+                    placeholder="Ej: 80"
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="ui-label">Tiempo (min)</span>
+                  <input
+                    type="number"
+                    step="1"
+                    min="0"
+                    className="ui-input"
+                    value={processConfig.cookTimeMinutes ?? ""}
+                    onChange={(event) =>
+                      setProcessConfig((current) => ({
+                        ...current,
+                        cookTimeMinutes: event.target.value ? Number(event.target.value) : "",
+                      }))
+                    }
+                    placeholder="Ej: 240"
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="ui-label">Equipo</span>
+                  <input
+                    className="ui-input"
+                    value={processConfig.cookEquipment ?? ""}
+                    onChange={(event) =>
+                      setProcessConfig((current) => ({ ...current, cookEquipment: event.target.value }))
+                    }
+                    placeholder="Ej: roner / horno / plancha"
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="ui-label">Temp. interna objetivo (C)</span>
+                  <input
+                    type="number"
+                    step="0.1"
+                    className="ui-input"
+                    value={processConfig.targetInternalTempC ?? ""}
+                    onChange={(event) =>
+                      setProcessConfig((current) => ({
+                        ...current,
+                        targetInternalTempC: event.target.value ? Number(event.target.value) : "",
+                      }))
+                    }
+                    placeholder="Opcional"
+                  />
+                </label>
+              </div>
+            </div>
+          ) : null}
+
+          {processConfig.specialStorage ? (
+            <div className="mt-4 rounded-xl border border-[var(--ui-border)] p-3">
+              <div className="text-sm font-semibold text-[var(--ui-text)]">Conservacion especial</div>
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                <label className="flex flex-col gap-1">
+                  <span className="ui-label">Condicion de almacenamiento</span>
+                  <input
+                    className="ui-input"
+                    value={processConfig.storageCondition ?? ""}
+                    onChange={(event) =>
+                      setProcessConfig((current) => ({ ...current, storageCondition: event.target.value }))
+                    }
+                    placeholder="Ej: refrigerado / congelado"
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="ui-label">Temperatura de almacenamiento (C)</span>
+                  <input
+                    type="number"
+                    step="0.1"
+                    className="ui-input"
+                    value={processConfig.storageTemperatureC ?? ""}
+                    onChange={(event) =>
+                      setProcessConfig((current) => ({
+                        ...current,
+                        storageTemperatureC: event.target.value ? Number(event.target.value) : "",
+                      }))
+                    }
+                    placeholder="Opcional"
+                  />
+                </label>
+              </div>
+            </div>
+          ) : null}
+
+          {processConfig.specialLabeling ? (
+            <div className="mt-4 rounded-xl border border-[var(--ui-border)] p-3">
+              <div className="text-sm font-semibold text-[var(--ui-text)]">Etiquetado especial</div>
+              <div className="mt-3 grid gap-3">
+                <label className="flex flex-col gap-1">
+                  <span className="ui-label">Notas para etiqueta o empaque</span>
+                  <textarea
+                    className="ui-input min-h-[112px] py-3"
+                    value={processConfig.labelNotes ?? ""}
+                    onChange={(event) =>
+                      setProcessConfig((current) => ({ ...current, labelNotes: event.target.value }))
+                    }
+                    placeholder="Ej: mantener refrigerado, abrir y consumir, lote y vencimiento obligatorios."
+                  />
+                </label>
+              </div>
+            </div>
+          ) : null}
+
+          {(processConfig.vacuumPackaging ||
+            processConfig.controlledCook ||
+            processConfig.specialStorage ||
+            processConfig.specialLabeling) ? (
+            <div className="mt-4 rounded-xl border border-[var(--ui-border)] p-3">
+              <label className="flex flex-col gap-1">
+                <span className="ui-label">Notas operativas del proceso</span>
+                <textarea
+                  className="ui-input min-h-[112px] py-3"
+                  value={processConfig.processNotes ?? ""}
+                  onChange={(event) =>
+                    setProcessConfig((current) => ({ ...current, processNotes: event.target.value }))
+                  }
+                  placeholder="Ej: dejar en coccion por el tiempo establecido para asegurar siempre la misma jugosidad."
+                />
+              </label>
+            </div>
+          ) : null}
         </div>
       </details>
     </section>

@@ -47,6 +47,7 @@ type RecipeCardRow = {
   shelf_life_days: number | null;
   difficulty: string | null;
   recipe_description: string | null;
+  process_config: Record<string, unknown> | null;
   status: "draft" | "published" | "archived";
   is_active: boolean;
 };
@@ -77,6 +78,18 @@ function asPositive(value: FormDataEntryValue | null, fallback: number) {
 
 function normalizeUnitCode(value: string | null | undefined) {
   return String(value ?? "").trim().toLowerCase();
+}
+
+function parseJsonObject(value: string) {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 function withQuery(path: string, key: string, value: string) {
@@ -205,6 +218,7 @@ async function saveRecipe(formData: FormData) {
     shelf_life_days: asNullableNumber(formData.get("shelf_life_days")),
     difficulty: asText(formData.get("difficulty")) || null,
     recipe_description: asText(formData.get("recipe_description")) || null,
+    process_config: parseJsonObject(asText(formData.get("process_config"))) ?? {},
     status,
     is_active: asText(formData.get("is_active")) === "1",
   };
@@ -432,7 +446,7 @@ export default async function NewRecipePage({
       supabase
         .from("recipe_cards")
         .select(
-          "id,product_id,site_id,yield_qty,yield_unit,portion_size,portion_unit,prep_time_minutes,shelf_life_days,difficulty,recipe_description,status,is_active"
+          "id,product_id,site_id,yield_qty,yield_unit,portion_size,portion_unit,prep_time_minutes,shelf_life_days,difficulty,recipe_description,process_config,status,is_active"
         )
         .order("updated_at", { ascending: false })
         .limit(600),
@@ -596,6 +610,7 @@ export default async function NewRecipePage({
           initialShelfLifeDays={selectedRecipeCard?.shelf_life_days ?? null}
           initialDifficulty={selectedRecipeCard?.difficulty ?? null}
           initialDescription={selectedRecipeCard?.recipe_description ?? null}
+          initialProcessConfig={selectedRecipeCard?.process_config ?? null}
           units={units}
           nexoCatalogUrl={
             selectedProductId

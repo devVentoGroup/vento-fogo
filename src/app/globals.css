@@ -259,6 +259,25 @@ body {
   box-shadow: var(--ui-shadow-2);
 }
 
+.ui-check-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  border: 1px solid var(--ui-border);
+  border-radius: 14px;
+  padding: 14px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(248, 250, 252, 0.92) 100%);
+  box-shadow: var(--ui-shadow-soft);
+}
+
+.ui-check-card input[type="checkbox"] {
+  margin-top: 2px;
+  height: 18px;
+  width: 18px;
+  accent-color: var(--ui-brand);
+  flex: 0 0 auto;
+}
+
 .ui-btn--ghost {
   border: 1px solid var(--ui-border);
   background: linear-gradient(180deg, #FFFFFF 0%, #F9FAFB 100%);

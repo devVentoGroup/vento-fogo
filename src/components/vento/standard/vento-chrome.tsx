@@ -134,12 +134,14 @@ function SidebarLink({
       href={item.href}
       onClick={onNavigate}
       title={collapsed ? item.label : undefined}
-      className={`ui-sidebar-item ${active ? "active" : ""} ${collapsed ? "lg:justify-center lg:px-2" : ""}`}
+      className={`ui-sidebar-item ${active ? "active" : ""} ${
+        collapsed ? "lg:h-10 lg:w-10 lg:items-center lg:justify-center lg:gap-0 lg:overflow-hidden lg:p-0" : ""
+      }`}
     >
       <span className="ui-sidebar-item-icon">
         <Icon name={item.icon} />
       </span>
-      <span className={`ui-sidebar-item-content ${collapsed ? "lg:hidden" : ""}`}>
+      <span className={`ui-sidebar-item-content ${collapsed ? "lg:!hidden" : ""}`}>
         <span className="ui-sidebar-item-title">{item.label}</span>
         {item.description ? <span className="ui-sidebar-item-desc">{item.description}</span> : null}
       </span>
@@ -245,25 +247,35 @@ export function VentoChrome({
         />
 
         <aside
-          className={`ui-sidebar fixed left-0 top-0 z-50 flex h-full w-72 flex-col gap-4 px-4 py-5 transition-all lg:static lg:translate-x-0 lg:shadow-none ${
+          className={`ui-sidebar fixed left-0 top-0 z-50 flex h-full w-72 flex-col gap-4 overflow-hidden px-4 py-5 transition-[width,padding,transform] duration-200 ease-out lg:static lg:translate-x-0 lg:shadow-none ${
             menuOpen ? "translate-x-0" : "-translate-x-full"
-          } ${sidebarCollapsed ? "lg:w-16 lg:px-2" : "lg:w-72 lg:px-4"}`}
+          } ${sidebarCollapsed ? "lg:w-16 lg:items-center lg:px-2" : "lg:w-72 lg:items-stretch lg:px-4"}`}
         >
-          <div className="flex items-center justify-between">
+          <div className={`flex items-center ${sidebarCollapsed ? "lg:justify-center" : "justify-between"}`}>
             <div className={sidebarCollapsed ? "lg:hidden" : ""}>
               <VentoLogo entity="fogo" title="Vento OS" subtitle={`${APP_NAME} - Produccion`} />
-            </div>
-            <div className={sidebarCollapsed ? "hidden lg:flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--ui-surface-2)] ring-1 ring-inset ring-[var(--ui-border)]" : "hidden"}>
-              <img src={`/logos/${APP_ENTITY}.svg`} alt={APP_NAME} className="h-6 w-6" />
             </div>
             <button
               type="button"
               onClick={() => setSidebarCollapsed((value) => !value)}
-              className="hidden h-10 w-10 items-center justify-center rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface)] text-[var(--ui-muted)] transition hover:bg-[var(--ui-surface-2)] hover:text-[var(--ui-text)] lg:inline-flex"
+              className={`hidden h-10 w-10 items-center justify-center text-[var(--ui-muted)] transition hover:bg-[var(--ui-surface-2)] hover:text-[var(--ui-text)] lg:inline-flex ${
+                sidebarCollapsed ? "group rounded-xl" : ""
+              }`}
               aria-label={sidebarCollapsed ? "Expandir menu lateral" : "Contraer menu lateral"}
               title={sidebarCollapsed ? "Expandir menu" : "Contraer menu"}
             >
-              <SidebarToggleIcon />
+              {sidebarCollapsed ? (
+                <>
+                  <span className="block group-hover:hidden">
+                    <VentoLogo entity={APP_ENTITY} showText={false} />
+                  </span>
+                  <span className="hidden group-hover:block">
+                    <SidebarToggleIcon />
+                  </span>
+                </>
+              ) : (
+                <SidebarToggleIcon />
+              )}
             </button>
             <button
               type="button"
@@ -274,12 +286,12 @@ export function VentoChrome({
             </button>
           </div>
 
-          <div className={`rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-4 py-3 ${sidebarCollapsed ? "lg:hidden" : ""}`}>
+          <div className={`rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-4 py-3 ${sidebarCollapsed ? "lg:!hidden" : ""}`}>
             <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ui-muted)]">Sede activa</div>
             <div className="mt-1 text-sm font-semibold text-[var(--ui-text)]">{currentSiteLabel}</div>
           </div>
 
-          <nav className={`flex flex-1 flex-col gap-4 overflow-y-auto pr-1 ${sidebarCollapsed ? "lg:pr-0" : ""}`}>
+          <nav className={`flex flex-1 flex-col gap-4 overflow-y-auto pr-1 ${sidebarCollapsed ? "lg:items-center lg:pr-0" : ""}`}>
             {!permissionsReady ? (
               <div className="rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-2 text-xs text-[var(--ui-muted)]">
                 Cargando permisos...
@@ -291,7 +303,7 @@ export function VentoChrome({
             ) : (
               visibleGroups.map((group) => (
                 <div key={group.label} className="space-y-2">
-                  <div className={`px-2 text-xs font-semibold uppercase tracking-wide text-[var(--ui-muted)] ${sidebarCollapsed ? "lg:hidden" : ""}`}>{group.label}</div>
+                  <div className={`px-2 text-xs font-semibold uppercase tracking-wide text-[var(--ui-muted)] ${sidebarCollapsed ? "lg:!hidden" : ""}`}>{group.label}</div>
                   <div className="space-y-1">
                     {group.items.map((item) => (
                       <SidebarLink
@@ -322,6 +334,7 @@ export function VentoChrome({
                 </button>
                 <div className="hidden sm:flex items-center gap-3">
                   <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--ui-surface-2)] ring-1 ring-inset ring-[var(--ui-border)]">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={`/logos/${APP_ENTITY}.svg`} alt={APP_NAME} className="h-6 w-6" />
                   </div>
                   <div className="flex flex-col leading-tight">

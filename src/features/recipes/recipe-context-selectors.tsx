@@ -9,6 +9,12 @@ type SiteOption = {
   name: string | null;
 };
 
+type AreaOption = {
+  id: string;
+  name: string | null;
+  kind: string | null;
+};
+
 type ProductOption = {
   id: string;
   name: string | null;
@@ -22,16 +28,27 @@ type RecipeCardLite = {
 
 type Props = {
   initialSiteId: string;
+  initialAreaId: string;
   initialProductId: string;
   source: string;
   sites: SiteOption[];
+  areas: AreaOption[];
   products: ProductOption[];
   recipeCards: RecipeCardLite[];
 };
 
-function buildUrl(pathname: string, params: URLSearchParams, siteId: string, productId: string, source: string) {
+function buildUrl(
+  pathname: string,
+  params: URLSearchParams,
+  siteId: string,
+  areaId: string,
+  productId: string,
+  source: string
+) {
   if (siteId) params.set("site_id", siteId);
   else params.delete("site_id");
+  if (areaId) params.set("area_id", areaId);
+  else params.delete("area_id");
   if (productId) params.set("product_id", productId);
   else params.delete("product_id");
   if (source) params.set("source", source);
@@ -43,9 +60,11 @@ function buildUrl(pathname: string, params: URLSearchParams, siteId: string, pro
 
 export function RecipeContextSelectors({
   initialSiteId,
+  initialAreaId,
   initialProductId,
   source,
   sites,
+  areas,
   products,
   recipeCards,
 }: Props) {
@@ -119,9 +138,16 @@ export function RecipeContextSelectors({
     };
   }, [openProductSearch, selectedProductLabel]);
 
-  const navigate = (nextSiteId: string, nextProductId: string) => {
+  const navigate = (nextSiteId: string, nextAreaId: string, nextProductId: string) => {
     const params = new URLSearchParams(searchParams?.toString() ?? "");
-    const target = buildUrl(pathname || "/recipes/new", params, nextSiteId, nextProductId, source || "fogo");
+    const target = buildUrl(
+      pathname || "/recipes/new",
+      params,
+      nextSiteId,
+      nextAreaId,
+      nextProductId,
+      source || "fogo"
+    );
     setIsNavigating(true);
     window.location.assign(target);
   };
@@ -135,7 +161,7 @@ export function RecipeContextSelectors({
           value={initialSiteId}
           onChange={(event) => {
             const nextSiteId = event.target.value;
-            navigate(nextSiteId, initialProductId);
+            navigate(nextSiteId, "", initialProductId);
           }}
           className="ui-input"
           disabled={isNavigating}
@@ -147,6 +173,29 @@ export function RecipeContextSelectors({
             </option>
           ))}
         </select>
+      </label>
+
+      <label className="flex flex-col gap-1">
+        <span className="ui-label">Area de receta</span>
+        <select
+          name="area_id"
+          value={initialAreaId}
+          onChange={(event) => {
+            navigate(initialSiteId, event.target.value, initialProductId);
+          }}
+          className="ui-input"
+          disabled={isNavigating || !initialSiteId}
+        >
+          <option value="">Sin area</option>
+          {areas.map((area) => (
+            <option key={area.id} value={area.id}>
+              {area.name ?? area.kind ?? area.id}
+            </option>
+          ))}
+        </select>
+        <span className="text-xs text-[var(--ui-muted)]">
+          El recetario operativo se filtra por esta area.
+        </span>
       </label>
 
       <label className="flex flex-col gap-1 md:col-span-2">
@@ -207,7 +256,7 @@ export function RecipeContextSelectors({
                         setProductSearch(label);
                         setOpenProductSearch(false);
                         if (product.id !== initialProductId) {
-                          navigate(initialSiteId, product.id);
+                          navigate(initialSiteId, initialAreaId, product.id);
                         }
                       }}
                       className="block w-full px-3 py-2 text-left text-sm hover:bg-[var(--ui-panel-soft)]"

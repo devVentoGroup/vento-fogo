@@ -39,6 +39,7 @@ type RecipeCardRow = {
   id: string;
   product_id: string;
   site_id: string | null;
+  area_id: string | null;
   yield_qty: number;
   yield_unit: string;
   portion_size: number | null;
@@ -96,9 +97,10 @@ function withQuery(path: string, key: string, value: string) {
   return `${path}${path.includes("?") ? "&" : "?"}${key}=${encodeURIComponent(value)}`;
 }
 
-function baseNewPath(siteId: string, productId: string, source: string) {
+function baseNewPath(siteId: string, areaId: string, productId: string, source: string) {
   const qs = new URLSearchParams();
   if (siteId) qs.set("site_id", siteId);
+  if (areaId) qs.set("area_id", areaId);
   if (productId) qs.set("product_id", productId);
   if (source) qs.set("source", source);
   const query = qs.toString();
@@ -109,9 +111,10 @@ async function saveRecipe(formData: FormData) {
   "use server";
 
   const siteId = asText(formData.get("site_id"));
+  const areaId = asText(formData.get("area_id"));
   const source = asText(formData.get("source"));
   const productId = asText(formData.get("product_id"));
-  const returnBase = baseNewPath(siteId, productId, source);
+  const returnBase = baseNewPath(siteId, areaId, productId, source);
 
   const { supabase } = await requireAppAccess({
     appId: APP_ID,
@@ -223,6 +226,7 @@ async function saveRecipe(formData: FormData) {
     is_active: asText(formData.get("is_active")) === "1",
   };
   if (siteId) recipePayload.site_id = siteId;
+  recipePayload.area_id = areaId || null;
 
   const { data: existingCard } = await supabase
     .from("recipe_cards")
@@ -386,6 +390,7 @@ export default async function NewRecipePage({
 }: {
   searchParams?: Promise<{
     site_id?: string;
+    area_id?: string;
     product_id?: string;
     source?: string;
     error?: string;
@@ -393,13 +398,14 @@ export default async function NewRecipePage({
 }) {
   const sp = (await searchParams) ?? {};
   const requestedSiteId = String(sp.site_id ?? "").trim();
+  const requestedAreaId = String(sp.area_id ?? "").trim();
   const requestedProductId = String(sp.product_id ?? "").trim();
   const source = String(sp.source ?? "").trim().toLowerCase();
   const error = String(sp.error ?? "").trim();
 
   const { supabase, user } = await requireAppAccess({
     appId: APP_ID,
-    returnTo: baseNewPath(requestedSiteId, requestedProductId, source),
+    returnTo: baseNewPath(requestedSiteId, requestedAreaId, requestedProductId, source),
     permissionCode: "production.recipes.manage",
   });
 
@@ -436,6 +442,16 @@ export default async function NewRecipePage({
     employeeSiteIds[0] ||
     String(employeeRow?.site_id ?? "").trim();
 
+  const { data: areasData } = resolvedSiteId
+    ? await supabase
+        .from("areas")
+        .select("id,name,kind")
+        .eq("site_id", resolvedSiteId)
+        .eq("is_active", true)
+        .order("name", { ascending: true })
+    : { data: [] as Array<{ id: string; name: string | null; kind: string | null }> };
+  const areas = (areasData ?? []) as Array<{ id: string; name: string | null; kind: string | null }>;
+
   const [
     { data: recipeCardsData },
     { data: productRows },
@@ -446,7 +462,7 @@ export default async function NewRecipePage({
       supabase
         .from("recipe_cards")
         .select(
-          "id,product_id,site_id,yield_qty,yield_unit,portion_size,portion_unit,prep_time_minutes,shelf_life_days,difficulty,recipe_description,process_config,status,is_active"
+          "id,product_id,site_id,area_id,yield_qty,yield_unit,portion_size,portion_unit,prep_time_minutes,shelf_life_days,difficulty,recipe_description,process_config,status,is_active"
         )
         .order("updated_at", { ascending: false })
         .limit(600),
@@ -564,9 +580,14 @@ export default async function NewRecipePage({
             <input type="hidden" name="source" value={source || "fogo"} />
             <RecipeContextSelectors
               initialSiteId={selectedRecipeCard?.site_id ?? resolvedSiteId}
+              initialAreaId={
+                selectedRecipeCard?.area_id ??
+                (areas.some((area) => area.id === requestedAreaId) ? requestedAreaId : "")
+              }
               initialProductId={selectedProductId}
               source={source || "fogo"}
               sites={sites.map((site) => ({ id: site.id, name: site.name }))}
+              areas={areas.map((area) => ({ id: area.id, name: area.name, kind: area.kind }))}
               products={products.map((product) => ({
                 id: product.id,
                 name: product.name,

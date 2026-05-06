@@ -558,6 +558,12 @@ export default async function NewRecipePage({
   }));
 
   const defaultYieldUnit = selectedRecipeCard?.yield_unit || selectedProduct?.unit || "un";
+  const formSiteId = requestedSiteId || selectedRecipeCard?.site_id || resolvedSiteId;
+  const formAreaId =
+    (requestedAreaId && areas.some((area) => area.id === requestedAreaId) ? requestedAreaId : "") ||
+    (selectedRecipeCard?.area_id && areas.some((area) => area.id === selectedRecipeCard.area_id)
+      ? selectedRecipeCard.area_id
+      : "");
 
   return (
     <div className="space-y-6">
@@ -579,11 +585,8 @@ export default async function NewRecipePage({
           <div className="grid gap-4 md:grid-cols-2">
             <input type="hidden" name="source" value={source || "fogo"} />
             <RecipeContextSelectors
-              initialSiteId={selectedRecipeCard?.site_id ?? resolvedSiteId}
-              initialAreaId={
-                selectedRecipeCard?.area_id ??
-                (areas.some((area) => area.id === requestedAreaId) ? requestedAreaId : "")
-              }
+              initialSiteId={formSiteId}
+              initialAreaId={formAreaId}
               initialProductId={selectedProductId}
               source={source || "fogo"}
               sites={sites.map((site) => ({ id: site.id, name: site.name }))}

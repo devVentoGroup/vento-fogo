@@ -82,7 +82,7 @@ export default async function RecipesPage({
   const { supabase } = await requireAppAccess({
     appId: APP_ID,
     returnTo: "/recipes",
-    permissionCode: "production.recipes",
+    permissionCode: "production.recipes.manage",
   });
 
   let query = supabase

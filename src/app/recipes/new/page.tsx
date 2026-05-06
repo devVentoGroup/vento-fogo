@@ -116,7 +116,7 @@ async function saveRecipe(formData: FormData) {
   const { supabase } = await requireAppAccess({
     appId: APP_ID,
     returnTo: returnBase,
-    permissionCode: "production.recipes",
+    permissionCode: "production.recipes.manage",
   });
 
   if (!productId) {
@@ -400,7 +400,7 @@ export default async function NewRecipePage({
   const { supabase, user } = await requireAppAccess({
     appId: APP_ID,
     returnTo: baseNewPath(requestedSiteId, requestedProductId, source),
-    permissionCode: "production.recipes",
+    permissionCode: "production.recipes.manage",
   });
 
   const [{ data: employeeSitesRows }, { data: employeeRow }] = await Promise.all([

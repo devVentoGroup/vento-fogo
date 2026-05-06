@@ -60,17 +60,24 @@ const NAV_GROUPS: NavGroup[] = [
     label: "Produccion",
     items: [
       {
+        href: "/recipe-book",
+        label: "Recetario",
+        description: "Consulta y produccion",
+        required: ["production.recipe_book.view"],
+        icon: "book",
+      },
+      {
         href: "/recipes",
-        label: "Recetas",
+        label: "Admin recetas",
         description: "BOM, pasos y medios",
-        required: ["production.recipes"],
+        required: ["production.recipes.manage"],
         icon: "book",
       },
       {
         href: "/production-batches",
         label: "Lotes",
         description: "Consumo y salida de terminado",
-        required: ["production.batches"],
+        required: ["production.batches.view"],
         icon: "flask",
       },
     ],
@@ -191,7 +198,15 @@ export function VentoChrome({
     return pathname === href || pathname.startsWith(`${href}/`);
   };
 
-  const permissionCodes = useMemo(() => ["access", "production.recipes", "production.batches"], []);
+  const permissionCodes = useMemo(
+    () => [
+      "access",
+      "production.recipe_book.view",
+      "production.recipes.manage",
+      "production.batches.view",
+    ],
+    []
+  );
 
   useEffect(() => {
     let activeRequest = true;

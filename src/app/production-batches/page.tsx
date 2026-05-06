@@ -44,7 +44,7 @@ export default async function ProductionBatchesPage({
   const { supabase } = await requireAppAccess({
     appId: APP_ID,
     returnTo: "/production-batches",
-    permissionCode: "production.batches",
+    permissionCode: "production.batches.view",
   });
 
   let batchQuery = supabase

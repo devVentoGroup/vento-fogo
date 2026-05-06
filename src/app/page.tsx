@@ -21,13 +21,13 @@ export default async function FogoHomePage() {
       </section>
 
       <section className="grid gap-4 sm:grid-cols-2">
-        <Link href="/recipes" className="ui-panel block transition hover:shadow-lg">
-          <div className="ui-h3">Recetas</div>
+        <Link href="/recipe-book" className="ui-panel block transition hover:shadow-lg">
+          <div className="ui-h3">Recetario</div>
           <p className="mt-1 ui-body-muted">
-            Gestion de ingredientes, pasos y medios operativos por producto.
+            Consulta visual por area con ingredientes escalados para produccion.
           </p>
           <span className="mt-3 inline-block text-sm font-semibold text-[var(--ui-brand-600)]">
-            Ir a recetas
+            Abrir recetario
           </span>
         </Link>
 

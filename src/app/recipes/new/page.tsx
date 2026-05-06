@@ -35,6 +35,13 @@ type SiteOption = {
   site_type: string | null;
 };
 
+type AreaOption = {
+  id: string;
+  code: string | null;
+  name: string | null;
+  kind: string | null;
+};
+
 type RecipeCardRow = {
   id: string;
   product_id: string;
@@ -61,6 +68,11 @@ type UnitOption = {
   is_active: boolean;
 };
 
+const PRODUCTION_RECIPE_AREA_KINDS = ["bodega", "cocina_caliente", "panaderia", "reposteria"];
+const PRODUCTION_RECIPE_AREA_ORDER = new Map(
+  PRODUCTION_RECIPE_AREA_KINDS.map((kind, index) => [kind, index])
+);
+
 function asText(value: FormDataEntryValue | null) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -79,6 +91,29 @@ function asPositive(value: FormDataEntryValue | null, fallback: number) {
 
 function normalizeUnitCode(value: string | null | undefined) {
   return String(value ?? "").trim().toLowerCase();
+}
+
+function normalizeSlug(value: string | null | undefined) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function isStandalonePanaderiaArea(area: AreaOption) {
+  const code = String(area.code ?? "").trim().toUpperCase();
+  const slug = normalizeSlug(area.name);
+  return code === "PAN" || code === "PANADERIA" || slug === "panaderia";
+}
+
+function sortProductionAreas(a: AreaOption, b: AreaOption) {
+  const aOrder = PRODUCTION_RECIPE_AREA_ORDER.get(String(a.kind ?? "")) ?? 999;
+  const bOrder = PRODUCTION_RECIPE_AREA_ORDER.get(String(b.kind ?? "")) ?? 999;
+  if (aOrder !== bOrder) return aOrder - bOrder;
+  return String(a.name ?? a.code ?? "").localeCompare(String(b.name ?? b.code ?? ""), "es");
 }
 
 function parseJsonObject(value: string) {
@@ -197,6 +232,9 @@ async function saveRecipe(formData: FormData) {
   const portionUnit = asText(formData.get("portion_unit")) || null;
 
   if (status === "published") {
+    if (!siteId || !areaId) {
+      redirect(withQuery(returnBase, "error", "Para publicar debes seleccionar sede y area productiva."));
+    }
     if (!yieldQty || yieldQty <= 0 || !yieldUnit) {
       redirect(withQuery(returnBase, "error", "Para publicar debes completar rendimiento y unidad."));
     }
@@ -208,6 +246,25 @@ async function saveRecipe(formData: FormData) {
     }
     if (normalizedStepDraft.length <= 0) {
       redirect(withQuery(returnBase, "error", "Para publicar debes tener al menos 1 paso de preparacion."));
+    }
+  }
+
+  if (areaId) {
+    const { data: areaRow } = await supabase
+      .from("areas")
+      .select("id,site_id,code,name,kind,is_active")
+      .eq("id", areaId)
+      .maybeSingle();
+    const area = areaRow as (AreaOption & { site_id: string | null; is_active: boolean | null }) | null;
+    const areaKind = String(area?.kind ?? "");
+    if (
+      !area ||
+      !area.is_active ||
+      (siteId && area.site_id !== siteId) ||
+      !PRODUCTION_RECIPE_AREA_KINDS.includes(areaKind) ||
+      isStandalonePanaderiaArea(area)
+    ) {
+      redirect(withQuery(returnBase, "error", "Selecciona un area productiva valida para el recetario."));
     }
   }
 
@@ -442,15 +499,38 @@ export default async function NewRecipePage({
     employeeSiteIds[0] ||
     String(employeeRow?.site_id ?? "").trim();
 
-  const { data: areasData } = resolvedSiteId
-    ? await supabase
-        .from("areas")
-        .select("id,name,kind")
-        .eq("site_id", resolvedSiteId)
-        .eq("is_active", true)
-        .order("name", { ascending: true })
-    : { data: [] as Array<{ id: string; name: string | null; kind: string | null }> };
-  const areas = (areasData ?? []) as Array<{ id: string; name: string | null; kind: string | null }>;
+  const selectedSite = sites.find((site) => site.id === resolvedSiteId) ?? null;
+  const [{ data: areaRulesData }, { data: areasData }] = resolvedSiteId
+    ? await Promise.all([
+        supabase
+          .from("site_area_purpose_rules")
+          .select("area_kind,is_enabled")
+          .eq("site_id", resolvedSiteId)
+          .eq("purpose", "production_recipe"),
+        supabase
+          .from("areas")
+          .select("id,code,name,kind")
+          .eq("site_id", resolvedSiteId)
+          .eq("is_active", true),
+      ])
+    : [
+        { data: [] as Array<{ area_kind: string | null; is_enabled: boolean | null }> },
+        { data: [] as AreaOption[] },
+      ];
+  const configuredKinds = new Set(
+    ((areaRulesData ?? []) as Array<{ area_kind: string | null; is_enabled: boolean | null }>)
+      .filter((rule) => rule.is_enabled !== false)
+      .map((rule) => String(rule.area_kind ?? ""))
+      .filter(Boolean)
+  );
+  const allowedAreaKinds =
+    configuredKinds.size > 0
+      ? configuredKinds
+      : new Set(selectedSite?.site_type === "production_center" ? PRODUCTION_RECIPE_AREA_KINDS : []);
+  const areas = ((areasData ?? []) as AreaOption[])
+    .filter((area) => allowedAreaKinds.has(String(area.kind ?? "")))
+    .filter((area) => !isStandalonePanaderiaArea(area))
+    .sort(sortProductionAreas);
 
   const [
     { data: recipeCardsData },

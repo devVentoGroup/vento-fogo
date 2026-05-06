@@ -21,6 +21,7 @@ type ProductShape = {
 
 type AreaShape = {
   id: string;
+  code?: string | null;
   name: string | null;
   kind: string | null;
   site_id?: string | null;
@@ -94,6 +95,34 @@ function areaLabel(area: AreaShape | null | undefined) {
   return area?.name || area?.kind || "Area";
 }
 
+const PRODUCTION_RECIPE_AREA_KINDS = ["bodega", "cocina_caliente", "panaderia", "reposteria"];
+const PRODUCTION_RECIPE_AREA_ORDER = new Map(
+  PRODUCTION_RECIPE_AREA_KINDS.map((kind, index) => [kind, index])
+);
+
+function normalizeSlug(value: string | null | undefined) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function isStandalonePanaderiaArea(area: AreaShape) {
+  const code = String(area.code ?? "").trim().toUpperCase();
+  const slug = normalizeSlug(area.name);
+  return code === "PAN" || code === "PANADERIA" || slug === "panaderia";
+}
+
+function sortProductionAreas(a: AreaShape, b: AreaShape) {
+  const aOrder = PRODUCTION_RECIPE_AREA_ORDER.get(String(a.kind ?? "")) ?? 999;
+  const bOrder = PRODUCTION_RECIPE_AREA_ORDER.get(String(b.kind ?? "")) ?? 999;
+  if (aOrder !== bOrder) return aOrder - bOrder;
+  return String(a.name ?? a.code ?? "").localeCompare(String(b.name ?? b.code ?? ""), "es");
+}
+
 function recipeHref(params: {
   siteId: string;
   areaId?: string | null;
@@ -140,14 +169,23 @@ export default async function RecipeBookPage({
   const role = String(employeeRow?.role ?? "").trim();
   const isManagement = ["propietario", "gerente_general", "gerente"].includes(role);
 
-  const [{ data: areasData }, { data: recipeRowsData }] = await Promise.all([
+  const [{ data: siteData }, { data: areaRulesData }, { data: areasData }, { data: recipeRowsData }] = await Promise.all([
+    siteId
+      ? supabase.from("sites").select("id,site_type").eq("id", siteId).maybeSingle()
+      : Promise.resolve({ data: null as { id: string; site_type: string | null } | null }),
+    siteId
+      ? supabase
+          .from("site_area_purpose_rules")
+          .select("area_kind,is_enabled")
+          .eq("site_id", siteId)
+          .eq("purpose", "production_recipe")
+      : Promise.resolve({ data: [] as Array<{ area_kind: string | null; is_enabled: boolean | null }> }),
     siteId
       ? supabase
           .from("areas")
-          .select("id,name,kind,site_id")
+          .select("id,code,name,kind,site_id")
           .eq("site_id", siteId)
           .eq("is_active", true)
-          .order("name", { ascending: true })
       : Promise.resolve({ data: [] as AreaShape[] }),
     (() => {
       let query = supabase
@@ -164,7 +202,20 @@ export default async function RecipeBookPage({
     })(),
   ]);
 
-  const areas = (areasData ?? []) as AreaShape[];
+  const configuredKinds = new Set(
+    ((areaRulesData ?? []) as Array<{ area_kind: string | null; is_enabled: boolean | null }>)
+      .filter((rule) => rule.is_enabled !== false)
+      .map((rule) => String(rule.area_kind ?? ""))
+      .filter(Boolean)
+  );
+  const allowedAreaKinds =
+    configuredKinds.size > 0
+      ? configuredKinds
+      : new Set(String(siteData?.site_type ?? "") === "production_center" ? PRODUCTION_RECIPE_AREA_KINDS : []);
+  const areas = ((areasData ?? []) as AreaShape[])
+    .filter((area) => allowedAreaKinds.has(String(area.kind ?? "")))
+    .filter((area) => !isStandalonePanaderiaArea(area))
+    .sort(sortProductionAreas);
   const allRecipes = (recipeRowsData ?? []) as RecipeCardRow[];
   const recipeCountByArea = new Map<string, number>();
   for (const recipe of allRecipes) {

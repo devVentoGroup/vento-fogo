@@ -521,26 +521,6 @@ export default async function NewRecipePage({
     employeeSiteIds[0] ||
     String(employeeRow?.site_id ?? "").trim();
 
-  let recipeAreasData: AreaOption[] = [];
-  if (resolvedSiteId) {
-    const { data: rpcAreasData } = await supabase.rpc("fogo_recipe_area_options", {
-      p_site_id: resolvedSiteId,
-    });
-    recipeAreasData = (rpcAreasData ?? []) as AreaOption[];
-    if (recipeAreasData.length === 0) {
-      const { data: fallbackAreasData } = await supabase
-        .from("areas")
-        .select("id,code,name,kind")
-        .eq("site_id", resolvedSiteId)
-        .eq("is_active", true);
-      recipeAreasData = (fallbackAreasData ?? []) as AreaOption[];
-    }
-  }
-  const allowedAreaKinds = new Set(PRODUCTION_RECIPE_AREA_KINDS);
-  const areas = recipeAreasData
-    .filter((area) => isProductionRecipeArea(area, allowedAreaKinds))
-    .sort(sortProductionAreas);
-
   const [
     { data: recipeCardsData },
     { data: productRows },
@@ -648,6 +628,27 @@ export default async function NewRecipePage({
 
   const defaultYieldUnit = selectedRecipeCard?.yield_unit || selectedProduct?.unit || "un";
   const formSiteId = requestedSiteId || selectedRecipeCard?.site_id || resolvedSiteId;
+
+  let recipeAreasData: AreaOption[] = [];
+  if (formSiteId) {
+    const { data: rpcAreasData } = await supabase.rpc("fogo_recipe_area_options", {
+      p_site_id: formSiteId,
+    });
+    recipeAreasData = (rpcAreasData ?? []) as AreaOption[];
+    if (recipeAreasData.length === 0) {
+      const { data: fallbackAreasData } = await supabase
+        .from("areas")
+        .select("id,code,name,kind")
+        .eq("site_id", formSiteId)
+        .eq("is_active", true);
+      recipeAreasData = (fallbackAreasData ?? []) as AreaOption[];
+    }
+  }
+  const allowedAreaKinds = new Set(PRODUCTION_RECIPE_AREA_KINDS);
+  const areas = recipeAreasData
+    .filter((area) => isProductionRecipeArea(area, allowedAreaKinds))
+    .sort(sortProductionAreas);
+
   const formAreaId =
     (requestedAreaId && areas.some((area) => area.id === requestedAreaId) ? requestedAreaId : "") ||
     (selectedRecipeCard?.area_id && areas.some((area) => area.id === selectedRecipeCard.area_id)
@@ -673,36 +674,6 @@ export default async function NewRecipePage({
         <section className="ui-panel space-y-5">
           <div className="grid gap-4 md:grid-cols-2">
             <input type="hidden" name="source" value={source || "fogo"} />
-            <label className="flex flex-col gap-1">
-              <span className="ui-label">Sede de receta</span>
-              <select name="site_id" defaultValue={formSiteId} className="ui-input">
-                <option value="">Sin sede</option>
-                {sites.map((site) => (
-                  <option key={site.id} value={site.id}>
-                    {site.name ?? site.id}
-                  </option>
-                ))}
-              </select>
-              <span className="text-xs text-[var(--ui-muted)]">
-                Cambia la sede desde la URL o recarga la ficha para actualizar areas.
-              </span>
-            </label>
-
-            <label className="flex flex-col gap-1">
-              <span className="ui-label">Area de receta</span>
-              <select name="area_id" defaultValue={formAreaId} className="ui-input" disabled={!formSiteId}>
-                <option value="">Sin area</option>
-                {areas.map((area) => (
-                  <option key={area.id} value={area.id}>
-                    {area.name ?? area.kind ?? area.id}
-                  </option>
-                ))}
-              </select>
-              <span className="text-xs text-[var(--ui-muted)]">
-                Areas cargadas para la sede seleccionada: {areas.length}.
-              </span>
-            </label>
-
             <RecipeContextSelectors
               initialSiteId={formSiteId}
               initialAreaId={formAreaId}

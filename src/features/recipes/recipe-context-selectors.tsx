@@ -63,6 +63,8 @@ export function RecipeContextSelectors({
   initialAreaId,
   initialProductId,
   source,
+  sites,
+  areas,
   products,
   recipeCards,
 }: Props) {
@@ -151,39 +153,82 @@ export function RecipeContextSelectors({
   };
 
   return (
-    <div className="md:col-span-2">
+    <>
       <label className="flex flex-col gap-1">
-        <span className="ui-label">Producto</span>
-        <input type="hidden" name="product_id" value={initialProductId} />
-        <div className="relative">
-          <input
-            ref={productInputRef}
-            type="text"
-            value={productSearch}
-            onFocus={() => {
-              setOpenProductSearch(true);
-              window.requestAnimationFrame(() => updateProductDropdownPosition());
-            }}
-            onChange={(event) => {
-              setProductSearch(event.target.value);
-              setOpenProductSearch(true);
-              window.requestAnimationFrame(() => updateProductDropdownPosition());
-            }}
-            onBlur={() => {
-              window.setTimeout(() => {
-                setProductSearch(selectedProductLabel);
-              }, 120);
-            }}
-            className="ui-input"
-            required
-            disabled={isNavigating}
-            placeholder="Buscar producto por nombre, SKU o tipo..."
-          />
-        </div>
+        <span className="ui-label">Sede de receta</span>
+        <select
+          name="site_id"
+          value={initialSiteId}
+          className="ui-input"
+          disabled={isNavigating}
+          onChange={(event) => navigate(event.target.value, "", initialProductId)}
+        >
+          <option value="">Sin sede</option>
+          {sites.map((site) => (
+            <option key={site.id} value={site.id}>
+              {site.name ?? site.id}
+            </option>
+          ))}
+        </select>
         <span className="text-xs text-[var(--ui-muted)]">
-          Al cambiar producto se recarga la ficha para evitar mezclar ingredientes/pasos de otra receta.
+          Cambiar sede recarga las areas disponibles para recetas.
         </span>
       </label>
+
+      <label className="flex flex-col gap-1">
+        <span className="ui-label">Area de receta</span>
+        <select
+          name="area_id"
+          value={initialAreaId}
+          className="ui-input"
+          disabled={!initialSiteId || isNavigating}
+          onChange={(event) => navigate(initialSiteId, event.target.value, initialProductId)}
+        >
+          <option value="">Sin area</option>
+          {areas.map((area) => (
+            <option key={area.id} value={area.id}>
+              {area.name ?? area.kind ?? area.id}
+            </option>
+          ))}
+        </select>
+        <span className="text-xs text-[var(--ui-muted)]">
+          Areas cargadas para la sede seleccionada: {areas.length}.
+        </span>
+      </label>
+
+      <div className="md:col-span-2">
+        <label className="flex flex-col gap-1">
+          <span className="ui-label">Producto</span>
+          <input type="hidden" name="product_id" value={initialProductId} />
+          <div className="relative">
+            <input
+              ref={productInputRef}
+              type="text"
+              value={productSearch}
+              onFocus={() => {
+                setOpenProductSearch(true);
+                window.requestAnimationFrame(() => updateProductDropdownPosition());
+              }}
+              onChange={(event) => {
+                setProductSearch(event.target.value);
+                setOpenProductSearch(true);
+                window.requestAnimationFrame(() => updateProductDropdownPosition());
+              }}
+              onBlur={() => {
+                window.setTimeout(() => {
+                  setProductSearch(selectedProductLabel);
+                }, 120);
+              }}
+              className="ui-input"
+              required
+              disabled={isNavigating}
+              placeholder="Buscar producto por nombre, SKU o tipo..."
+            />
+          </div>
+          <span className="text-xs text-[var(--ui-muted)]">
+            Al cambiar producto se recarga la ficha para evitar mezclar ingredientes/pasos de otra receta.
+          </span>
+        </label>
 
       {typeof document !== "undefined" && openProductSearch && productDropdownRect
         ? createPortal(
@@ -226,6 +271,7 @@ export function RecipeContextSelectors({
             document.body
           )
         : null}
-    </div>
+      </div>
+    </>
   );
 }

@@ -204,23 +204,12 @@ export default async function RecipeBookPage({
   const role = String(employeeRow?.role ?? "").trim();
   const isManagement = ["propietario", "gerente_general", "gerente"].includes(role);
 
-  const [{ data: siteData }, { data: areaRulesData }, { data: areasData }, { data: recipeRowsData }] = await Promise.all([
+  const [{ data: siteData }, { data: rpcAreasData }, { data: recipeRowsData }] = await Promise.all([
     siteId
       ? supabase.from("sites").select("id,site_type").eq("id", siteId).maybeSingle()
       : Promise.resolve({ data: null as { id: string; site_type: string | null } | null }),
     siteId
-      ? supabase
-          .from("site_area_purpose_rules")
-          .select("area_kind,is_enabled")
-          .eq("site_id", siteId)
-          .eq("purpose", "production_recipe")
-      : Promise.resolve({ data: [] as Array<{ area_kind: string | null; is_enabled: boolean | null }> }),
-    siteId
-      ? supabase
-          .from("areas")
-          .select("id,code,name,kind,site_id")
-          .eq("site_id", siteId)
-          .eq("is_active", true)
+      ? supabase.rpc("fogo_recipe_area_options", { p_site_id: siteId })
       : Promise.resolve({ data: [] as AreaShape[] }),
     (() => {
       let query = supabase
@@ -237,17 +226,19 @@ export default async function RecipeBookPage({
     })(),
   ]);
 
-  const configuredKinds = new Set(
-    ((areaRulesData ?? []) as Array<{ area_kind: string | null; is_enabled: boolean | null }>)
-      .filter((rule) => rule.is_enabled !== false)
-      .map((rule) => String(rule.area_kind ?? ""))
-      .filter(Boolean)
+  let recipeAreasData = (rpcAreasData ?? []) as AreaShape[];
+  if (siteId && recipeAreasData.length === 0) {
+    const { data: fallbackAreasData } = await supabase
+      .from("areas")
+      .select("id,code,name,kind,site_id")
+      .eq("site_id", siteId)
+      .eq("is_active", true);
+    recipeAreasData = (fallbackAreasData ?? []) as AreaShape[];
+  }
+  const allowedAreaKinds = new Set(
+    String(siteData?.site_type ?? "") === "production_center" ? PRODUCTION_RECIPE_AREA_KINDS : []
   );
-  const allowedAreaKinds =
-    configuredKinds.size > 0
-      ? configuredKinds
-      : new Set(String(siteData?.site_type ?? "") === "production_center" ? PRODUCTION_RECIPE_AREA_KINDS : []);
-  const areas = ((areasData ?? []) as AreaShape[])
+  const areas = recipeAreasData
     .filter((area) => isProductionRecipeArea(area, allowedAreaKinds))
     .sort(sortProductionAreas);
   const allRecipes = (recipeRowsData ?? []) as RecipeCardRow[];

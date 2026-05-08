@@ -281,18 +281,11 @@ async function saveRecipe(formData: FormData) {
   }
 
   if (areaId) {
-    const { data: areaRow } = await supabase
-      .from("areas")
-      .select("id,site_id,code,name,kind,is_active")
-      .eq("id", areaId)
-      .maybeSingle();
-    const area = areaRow as (AreaOption & { site_id: string | null; is_active: boolean | null }) | null;
-    if (
-      !area ||
-      !area.is_active ||
-      (siteId && area.site_id !== siteId) ||
-      !isProductionRecipeArea(area, new Set(PRODUCTION_RECIPE_AREA_KINDS))
-    ) {
+    const { data: validAreas } = siteId
+      ? await supabase.rpc("fogo_recipe_area_options", { p_site_id: siteId })
+      : { data: [] as AreaOption[] };
+    const area = ((validAreas ?? []) as AreaOption[]).find((option) => option.id === areaId) ?? null;
+    if (!area) {
       redirect(withQuery(returnBase, "error", "Selecciona un area productiva valida para el recetario."));
     }
   }
@@ -529,34 +522,25 @@ export default async function NewRecipePage({
     String(employeeRow?.site_id ?? "").trim();
 
   const selectedSite = sites.find((site) => site.id === resolvedSiteId) ?? null;
-  const [{ data: areaRulesData }, { data: areasData }] = resolvedSiteId
-    ? await Promise.all([
-        supabase
-          .from("site_area_purpose_rules")
-          .select("area_kind,is_enabled")
-          .eq("site_id", resolvedSiteId)
-          .eq("purpose", "production_recipe"),
-        supabase
-          .from("areas")
-          .select("id,code,name,kind")
-          .eq("site_id", resolvedSiteId)
-          .eq("is_active", true),
-      ])
-    : [
-        { data: [] as Array<{ area_kind: string | null; is_enabled: boolean | null }> },
-        { data: [] as AreaOption[] },
-      ];
-  const configuredKinds = new Set(
-    ((areaRulesData ?? []) as Array<{ area_kind: string | null; is_enabled: boolean | null }>)
-      .filter((rule) => rule.is_enabled !== false)
-      .map((rule) => String(rule.area_kind ?? ""))
-      .filter(Boolean)
+  let recipeAreasData: AreaOption[] = [];
+  if (resolvedSiteId) {
+    const { data: rpcAreasData } = await supabase.rpc("fogo_recipe_area_options", {
+      p_site_id: resolvedSiteId,
+    });
+    recipeAreasData = (rpcAreasData ?? []) as AreaOption[];
+    if (recipeAreasData.length === 0) {
+      const { data: fallbackAreasData } = await supabase
+        .from("areas")
+        .select("id,code,name,kind")
+        .eq("site_id", resolvedSiteId)
+        .eq("is_active", true);
+      recipeAreasData = (fallbackAreasData ?? []) as AreaOption[];
+    }
+  }
+  const allowedAreaKinds = new Set(
+    selectedSite?.site_type === "production_center" ? PRODUCTION_RECIPE_AREA_KINDS : []
   );
-  const allowedAreaKinds =
-    configuredKinds.size > 0
-      ? configuredKinds
-      : new Set(selectedSite?.site_type === "production_center" ? PRODUCTION_RECIPE_AREA_KINDS : []);
-  const areas = ((areasData ?? []) as AreaOption[])
+  const areas = recipeAreasData
     .filter((area) => isProductionRecipeArea(area, allowedAreaKinds))
     .sort(sortProductionAreas);
 

@@ -63,8 +63,6 @@ export function RecipeContextSelectors({
   initialAreaId,
   initialProductId,
   source,
-  sites,
-  areas,
   products,
   recipeCards,
 }: Props) {
@@ -153,52 +151,8 @@ export function RecipeContextSelectors({
   };
 
   return (
-    <div className="grid gap-4 md:grid-cols-2">
+    <div className="md:col-span-2">
       <label className="flex flex-col gap-1">
-        <span className="ui-label">Sede de receta</span>
-        <select
-          name="site_id"
-          value={initialSiteId}
-          onChange={(event) => {
-            const nextSiteId = event.target.value;
-            navigate(nextSiteId, "", initialProductId);
-          }}
-          className="ui-input"
-          disabled={isNavigating}
-        >
-          <option value="">Sin sede</option>
-          {sites.map((site) => (
-            <option key={site.id} value={site.id}>
-              {site.name ?? site.id}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      <label className="flex flex-col gap-1">
-        <span className="ui-label">Area de receta</span>
-        <select
-          name="area_id"
-          value={initialAreaId}
-          onChange={(event) => {
-            navigate(initialSiteId, event.target.value, initialProductId);
-          }}
-          className="ui-input"
-          disabled={isNavigating || !initialSiteId}
-        >
-          <option value="">Sin area</option>
-          {areas.map((area) => (
-            <option key={area.id} value={area.id}>
-              {area.name ?? area.kind ?? area.id}
-            </option>
-          ))}
-        </select>
-        <span className="text-xs text-[var(--ui-muted)]">
-          El recetario operativo se filtra por esta area.
-        </span>
-      </label>
-
-      <label className="flex flex-col gap-1 md:col-span-2">
         <span className="ui-label">Producto</span>
         <input type="hidden" name="product_id" value={initialProductId} />
         <div className="relative">

@@ -204,10 +204,7 @@ export default async function RecipeBookPage({
   const role = String(employeeRow?.role ?? "").trim();
   const isManagement = ["propietario", "gerente_general", "gerente"].includes(role);
 
-  const [{ data: siteData }, { data: rpcAreasData }, { data: recipeRowsData }] = await Promise.all([
-    siteId
-      ? supabase.from("sites").select("id,site_type").eq("id", siteId).maybeSingle()
-      : Promise.resolve({ data: null as { id: string; site_type: string | null } | null }),
+  const [{ data: rpcAreasData }, { data: recipeRowsData }] = await Promise.all([
     siteId
       ? supabase.rpc("fogo_recipe_area_options", { p_site_id: siteId })
       : Promise.resolve({ data: [] as AreaShape[] }),
@@ -235,9 +232,7 @@ export default async function RecipeBookPage({
       .eq("is_active", true);
     recipeAreasData = (fallbackAreasData ?? []) as AreaShape[];
   }
-  const allowedAreaKinds = new Set(
-    String(siteData?.site_type ?? "") === "production_center" ? PRODUCTION_RECIPE_AREA_KINDS : []
-  );
+  const allowedAreaKinds = new Set(PRODUCTION_RECIPE_AREA_KINDS);
   const areas = recipeAreasData
     .filter((area) => isProductionRecipeArea(area, allowedAreaKinds))
     .sort(sortProductionAreas);

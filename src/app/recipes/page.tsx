@@ -8,16 +8,24 @@ const APP_ID = "fogo";
 const NEXO_BASE_URL = process.env.NEXT_PUBLIC_NEXO_URL?.replace(/\/$/, "") || "https://nexo.ventogroup.co";
 const FOGO_BASE_URL = process.env.NEXT_PUBLIC_FOGO_URL?.replace(/\/$/, "") || "https://fogo.ventogroup.co";
 
-type ProductShape = { name: string | null; sku: string | null; unit: string | null };
+type ProductShape = {
+  name: string | null;
+  sku: string | null;
+  unit: string | null;
+  product_type: string | null;
+};
+type AreaShape = { id: string; name: string | null; kind: string | null };
 
 type RecipeCardRow = {
   id: string;
   product_id: string;
+  area_id: string | null;
   yield_qty: number;
   yield_unit: string;
   status: "draft" | "published" | "archived";
   updated_at: string;
   products?: ProductShape | ProductShape[] | null;
+  areas?: AreaShape | AreaShape[] | null;
 };
 type LegacyRecipeRow = {
   product_id: string;
@@ -49,6 +57,19 @@ function resolveProduct(value: ProductShape | ProductShape[] | null | undefined)
   return value;
 }
 
+function resolveArea(value: AreaShape | AreaShape[] | null | undefined): AreaShape | null {
+  if (!value) return null;
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value;
+}
+
+function productTypeLabel(value: string | null | undefined) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (normalized === "preparacion") return "Preparacion";
+  if (normalized === "venta") return "Producto terminado";
+  return normalized || "Sin tipo";
+}
+
 function buildRecipeNewUrl(params: { productId?: string; siteId?: string; source?: string }) {
   const url = new URL("/recipes/new", FOGO_BASE_URL);
   if (params.productId) url.searchParams.set("product_id", params.productId);
@@ -68,6 +89,8 @@ export default async function RecipesPage({
     saved?: string;
     error?: string;
     q?: string;
+    product_type?: string;
+    area_id?: string;
   }>;
 }) {
   const sp = (await searchParams) ?? {};
@@ -78,6 +101,8 @@ export default async function RecipesPage({
   const saved = String(sp.saved ?? "").trim() === "1";
   const error = String(sp.error ?? "").trim();
   const searchTerm = String(sp.q ?? "").trim().toLowerCase();
+  const productTypeFilter = String(sp.product_type ?? "").trim().toLowerCase();
+  const areaFilter = String(sp.area_id ?? "").trim();
 
   const { supabase } = await requireAppAccess({
     appId: APP_ID,
@@ -87,9 +112,9 @@ export default async function RecipesPage({
 
   let query = supabase
     .from("recipe_cards")
-    .select("id,product_id,yield_qty,yield_unit,status,updated_at,products(name,sku,unit)")
+    .select("id,product_id,site_id,area_id,yield_qty,yield_unit,status,updated_at,products(name,sku,unit,product_type),areas(id,name,kind)")
     .order("updated_at", { ascending: false })
-    .limit(100);
+    .limit(500);
 
   if (siteId) {
     query = query.eq("site_id", siteId);
@@ -118,11 +143,19 @@ export default async function RecipesPage({
   if (legacyOnlyProductIds.length > 0) {
     const { data: legacyProductsData } = await supabase
       .from("products")
-      .select("id,name,sku,unit")
+      .select("id,name,sku,unit,product_type")
       .in("id", legacyOnlyProductIds);
     legacyProductMap = new Map(
-      (((legacyProductsData ?? []) as Array<{ id: string; name: string | null; sku: string | null; unit: string | null }>) ?? [])
-        .map((row) => [row.id, { name: row.name, sku: row.sku, unit: row.unit }])
+      ((legacyProductsData ?? []) as Array<{
+        id: string;
+        name: string | null;
+        sku: string | null;
+        unit: string | null;
+        product_type: string | null;
+      }>).map((row) => [
+        row.id,
+        { name: row.name, sku: row.sku, unit: row.unit, product_type: row.product_type },
+      ])
     );
   }
 
@@ -135,11 +168,13 @@ export default async function RecipesPage({
     return {
       id: `legacy:${pid}`,
       product_id: pid,
+      area_id: null,
       yield_qty: 0,
       yield_unit: legacyProductMap.get(pid)?.unit ?? "-",
       status: "draft",
       updated_at: lastUpdated,
       products: legacyProductMap.get(pid) ?? null,
+      areas: null,
     };
   });
   const allRecipeCards = [...recipeCards, ...legacyRecipeCards].sort((a, b) =>
@@ -195,11 +230,23 @@ export default async function RecipesPage({
     stepsByCard.set(row.recipe_card_id, (stepsByCard.get(row.recipe_card_id) ?? 0) + 1);
   }
 
+  const areaOptions = Array.from(
+    new Map(
+      allRecipeCards
+        .map((row) => resolveArea(row.areas))
+        .filter((area): area is AreaShape => Boolean(area?.id))
+        .map((area) => [area.id, area])
+    ).values()
+  ).sort((a, b) => String(a.name ?? a.kind ?? "").localeCompare(String(b.name ?? b.kind ?? ""), "es"));
+
   const filteredRecipeCards = allRecipeCards.filter((row) => {
-    if (!searchTerm) return true;
     const product = resolveProduct(row.products);
-    const name = String(product?.name ?? "").toLowerCase();
-    return name.includes(searchTerm);
+    const productType = String(product?.product_type ?? "").trim().toLowerCase();
+    if (productTypeFilter && productType !== productTypeFilter) return false;
+    if (areaFilter && row.area_id !== areaFilter) return false;
+    if (!searchTerm) return true;
+    const haystack = `${product?.name ?? ""} ${product?.sku ?? ""}`.toLowerCase();
+    return haystack.includes(searchTerm);
   });
 
   const published = filteredRecipeCards.filter((r) => r.status === "published").length;
@@ -282,7 +329,7 @@ export default async function RecipesPage({
             Abrir catalogo en NEXO
           </a>
         </div>
-        <form className="mb-4 flex flex-wrap items-end gap-2">
+        <form className="mb-4 grid gap-3 lg:grid-cols-[minmax(240px,1fr)_220px_240px_auto_auto] lg:items-end">
           <label className="min-w-[260px] flex-1">
             <span className="ui-label">Buscar por nombre</span>
             <input
@@ -292,6 +339,25 @@ export default async function RecipesPage({
               placeholder="Ej: galleta, pulled pork, cebolla..."
               className="ui-input"
             />
+          </label>
+          <label>
+            <span className="ui-label">Tipo</span>
+            <select name="product_type" defaultValue={productTypeFilter} className="ui-input">
+              <option value="">Todos</option>
+              <option value="preparacion">Preparaciones</option>
+              <option value="venta">Productos terminados</option>
+            </select>
+          </label>
+          <label>
+            <span className="ui-label">Area asignada</span>
+            <select name="area_id" defaultValue={areaFilter} className="ui-input">
+              <option value="">Todas las areas</option>
+              {areaOptions.map((area) => (
+                <option key={area.id} value={area.id}>
+                  {area.name ?? area.kind ?? area.id}
+                </option>
+              ))}
+            </select>
           </label>
           {siteId ? <input type="hidden" name="site_id" value={siteId} /> : null}
           {productId ? <input type="hidden" name="product_id" value={productId} /> : null}
@@ -308,11 +374,13 @@ export default async function RecipesPage({
         </form>
 
         <div className="overflow-x-auto">
-          <table className="ui-table min-w-[920px]">
+          <table className="ui-table min-w-[1120px]">
             <thead>
               <tr>
                 <th className="ui-th">Producto</th>
                 <th className="ui-th">SKU</th>
+                <th className="ui-th">Tipo</th>
+                <th className="ui-th">Area</th>
                 <th className="ui-th">Rendimiento</th>
                 <th className="ui-th">Ingredientes</th>
                 <th className="ui-th">Pasos</th>
@@ -326,12 +394,21 @@ export default async function RecipesPage({
                 const ingredient = ingredientByProduct.get(row.product_id) ?? { lines: 0, qty: 0 };
                 const steps = row.id.startsWith("legacy:") ? 0 : (stepsByCard.get(row.id) ?? 0);
                 const product = resolveProduct(row.products);
+                const area = resolveArea(row.areas);
                 const productName = product?.name || "Producto";
                 const sku = product?.sku || "-";
                 return (
                   <tr key={row.id}>
                     <td className="ui-td">{productName}</td>
                     <td className="ui-td">{sku}</td>
+                    <td className="ui-td">{productTypeLabel(product?.product_type)}</td>
+                    <td className="ui-td">
+                      {area ? (
+                        <span className="ui-chip ui-chip--brand">{area.name ?? area.kind ?? "Area"}</span>
+                      ) : (
+                        <span className="text-[var(--ui-muted)]">Sin area</span>
+                      )}
+                    </td>
                     <td className="ui-td">{qty(row.yield_qty)} {row.yield_unit}</td>
                     <td className="ui-td">{ingredient.lines} lineas</td>
                     <td className="ui-td">{steps}</td>
@@ -345,7 +422,7 @@ export default async function RecipesPage({
                       <div className="flex flex-wrap gap-2">
                         <Link
                           className="ui-btn ui-btn--ghost ui-btn--sm"
-                          href={`/recipes/new?product_id=${encodeURIComponent(row.product_id)}${siteId ? `&site_id=${encodeURIComponent(siteId)}` : ""}`}
+                          href={`/recipes/new?product_id=${encodeURIComponent(row.product_id)}${siteId ? `&site_id=${encodeURIComponent(siteId)}` : ""}${row.area_id ? `&area_id=${encodeURIComponent(row.area_id)}` : ""}`}
                         >
                           Editar ficha
                         </Link>
@@ -359,7 +436,7 @@ export default async function RecipesPage({
               })}
               {filteredRecipeCards.length === 0 ? (
                 <tr>
-                  <td className="ui-td ui-empty" colSpan={8}>
+                  <td className="ui-td ui-empty" colSpan={10}>
                     {searchTerm
                       ? "No hay recetas que coincidan con ese nombre."
                       : focusedRecipeCard

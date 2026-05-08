@@ -57,6 +57,10 @@ type StockRow = {
   current_qty: number | null;
 };
 
+type ProductSiteSettingRow = {
+  production_location_id: string | null;
+};
+
 function one<T>(value: Relation<T>): T | null {
   if (!value) return null;
   return Array.isArray(value) ? value[0] ?? null : value;
@@ -197,7 +201,7 @@ export default async function NewProductionBatchPage({
     );
   }
 
-  const [{ data: ingredientRows }, { data: locationsData }] = await Promise.all([
+  const [{ data: ingredientRows }, { data: locationsData }, { data: productSiteSettingData }] = await Promise.all([
     supabase
       .from("recipes")
       .select("ingredient_product_id,quantity,products(id,name,sku,unit,stock_unit_code,cost)")
@@ -210,20 +214,34 @@ export default async function NewProductionBatchPage({
       .eq("site_id", recipe.site_id)
       .eq("is_active", true)
       .order("code", { ascending: true }),
+    supabase
+      .from("product_site_settings")
+      .select("production_location_id")
+      .eq("product_id", recipe.product_id)
+      .eq("site_id", recipe.site_id)
+      .eq("is_active", true)
+      .maybeSingle(),
   ]);
 
   const ingredients = (ingredientRows ?? []) as IngredientRow[];
   const locations = (locationsData ?? []) as LocationRow[];
+  const productSiteSetting = productSiteSettingData as ProductSiteSettingRow | null;
+  const configuredProductionLocationId = String(productSiteSetting?.production_location_id ?? "").trim();
+  const configuredProductionLocation = configuredProductionLocationId
+    ? locations.find((location) => location.id === configuredProductionLocationId) ?? null
+    : null;
   const ingredientIds = ingredients.map((row) => row.ingredient_product_id);
-  const locationIds = locations.map((row) => row.id);
+  const stockLocationIds = configuredProductionLocationId
+    ? [configuredProductionLocationId]
+    : locations.map((row) => row.id);
 
   const { data: stockData } =
-    ingredientIds.length && locationIds.length
+    ingredientIds.length && stockLocationIds.length
       ? await supabase
           .from("inventory_stock_by_location")
           .select("location_id,product_id,current_qty")
           .in("product_id", ingredientIds)
-          .in("location_id", locationIds)
+          .in("location_id", stockLocationIds)
       : { data: [] as StockRow[] };
 
   const stockByProduct = new Map<string, number>();
@@ -240,6 +258,7 @@ export default async function NewProductionBatchPage({
   }, 0);
   const destinationId =
     (requestedDestinationId && locations.some((loc) => loc.id === requestedDestinationId) ? requestedDestinationId : "") ||
+    configuredProductionLocation?.id ||
     locations.find((loc) => loc.location_type === "production")?.id ||
     locations[0]?.id ||
     "";
@@ -310,14 +329,28 @@ export default async function NewProductionBatchPage({
           </label>
           <label className="block">
             <span className="ui-label">LOC destino del terminado</span>
-            <select className="ui-input mt-1" name="destination_location_id" defaultValue={destinationId} required>
-              <option value="">Selecciona LOC</option>
-              {locations.map((location) => (
-                <option key={location.id} value={location.id}>
-                  {locationLabel(location)}
-                </option>
-              ))}
-            </select>
+            {configuredProductionLocation ? (
+              <>
+                <input type="hidden" name="destination_location_id" value={configuredProductionLocation.id} />
+                <div className="mt-1 rounded-lg border border-[var(--ui-border)] bg-[var(--ui-bg-soft)] px-3 py-2 text-sm font-semibold text-[var(--ui-text)]">
+                  {locationLabel(configuredProductionLocation)}
+                </div>
+              </>
+            ) : (
+              <select className="ui-input mt-1" name="destination_location_id" defaultValue={destinationId} required>
+                <option value="">Selecciona LOC</option>
+                {locations.map((location) => (
+                  <option key={location.id} value={location.id}>
+                    {locationLabel(location)}
+                  </option>
+                ))}
+              </select>
+            )}
+            <p className="mt-1 text-xs text-[var(--ui-muted)]">
+              {configuredProductionLocation
+                ? "Este producto consume insumos y suma terminado en el LOC configurado."
+                : "Sin LOC configurado para este producto/sede; se permite seleccion manual."}
+            </p>
           </label>
           <label className="block">
             <span className="ui-label">Notas</span>

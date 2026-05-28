@@ -1,23 +1,26 @@
-# FOGO - Recetas y produccion
+﻿# FOGO
 
-Aplicacion Vento OS para:
-- Recetas (`/recipes`)
-- Lotes de produccion (`/production-batches`)
+FOGO es la app Vento OS para recetas, recipe book operacional y lotes de produccion.
 
-## Alcance operativo
-- FOGO centraliza BOM, pasos y ejecucion de lotes.
-- NEXO queda enfocado en logistica y stock.
-- ORIGO queda enfocado en compras y recepciones.
+## Estado actual
 
-## Permisos esperados
-- `fogo.access`
-- `fogo.production.recipes`
-- `fogo.production.batches`
+- `/recipes`: administracion de recetas.
+- `/recipes/new`: creacion de receta.
+- `/recipe-book`: experiencia operacional para consultar recetas publicadas.
+- `/production-batches`: lotes de produccion.
+- `/production-batches/new`: creacion de lote desde receta.
+
+La base de datos, RPCs, permisos y migraciones compartidas viven en `vento-shell`.
 
 ## Desarrollo
+
 ```bash
 npm install
 npm run dev
 ```
 
-Puerto local por defecto: `3004`.
+Puerto local esperado: `3004`.
+
+## Documentacion
+
+- `docs/ESTADO-ACTUAL-FOGO-2026-05-28.md`

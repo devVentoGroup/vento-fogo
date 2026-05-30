@@ -39,7 +39,9 @@ type IconName =
   | "menu"
   | "fileText"
   | "briefcase"
-  | "phone";
+  | "phone"
+  | "book"
+  | "flask";
 
 type NavigationRow = {
   group_label: string | null;
@@ -92,6 +94,8 @@ const ICON_NAMES = new Set<IconName>([
   "fileText",
   "briefcase",
   "phone",
+  "book",
+  "flask",
 ]);
 
 const APP_SWITCHER_ITEMS: Omit<AppSwitcherItem, "access">[] = [

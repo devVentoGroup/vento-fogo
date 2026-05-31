@@ -95,6 +95,14 @@ function difficultyLabel(value: string | null | undefined) {
   return value;
 }
 
+function isDraftStatus(value: string | null | undefined) {
+  return String(value ?? "").trim().toLowerCase() === "draft";
+}
+
+function isPublishedStatus(value: string | null | undefined) {
+  return String(value ?? "").trim().toLowerCase() === "published";
+}
+
 function areaLabel(area: AreaShape | null | undefined) {
   return area?.name || area?.kind || "Sin area";
 }
@@ -227,7 +235,7 @@ export default async function RecipeBookPage({
           "id,product_id,site_id,area_id,yield_qty,yield_unit,portion_size,portion_unit,prep_time_minutes,shelf_life_days,difficulty,recipe_description,cover_image_path,status,products(id,name,sku,unit,stock_unit_code,image_url,catalog_image_url),areas(id,code,name,kind,site_id)"
         )
         .eq("is_active", true)
-        .eq("status", "published")
+        .in("status", isManagement ? ["published", "draft"] : ["published"])
         .order("updated_at", { ascending: false })
         .limit(240);
       if (siteId) query = query.eq("site_id", siteId);
@@ -325,6 +333,9 @@ export default async function RecipeBookPage({
   const baseYield = `${fmt(selectedRecipe?.yield_qty)} ${selectedRecipe?.yield_unit ?? "-"}`;
   const targetYield = `${fmt(productionQty)} ${selectedRecipe?.yield_unit ?? selectedProduct?.unit ?? "-"}`;
   const totalMinutes = steps.reduce((acc, step) => acc + Number(step.time_minutes ?? 0), 0);
+  const selectedRecipeIsDraft = isDraftStatus(selectedRecipe?.status);
+  const selectedRecipeIsPublished = isPublishedStatus(selectedRecipe?.status);
+  const visibleRecipeTypeText = isManagement ? "publicadas y borradores" : "publicadas";
 
   if (!hasRecipes) {
     return (
@@ -336,10 +347,10 @@ export default async function RecipeBookPage({
                 Recetario FOGO
               </span>
               <h1 className="mt-4 max-w-3xl text-4xl font-semibold leading-tight text-[var(--ui-text)] md:text-6xl">
-                No hay recetas listas para producir
+                No hay recetas visibles
               </h1>
               <p className="mt-4 max-w-2xl text-base leading-7 text-[var(--ui-muted)] md:text-lg">
-                Cuando una receta este publicada, aparecera aqui como ficha visual para que el equipo pueda producirla paso a paso.
+                Cuando una receta este disponible para tu rol, aparecera aqui como ficha visual para que el equipo pueda revisarla o producirla paso a paso.
               </p>
             </div>
             <div className="rounded-2xl border border-[#FDBA74] bg-white p-5 shadow-[var(--ui-shadow-soft)]">
@@ -382,8 +393,13 @@ export default async function RecipeBookPage({
                   {selectedAreaName}
                 </span>
                 <span className="rounded-full border border-white/30 bg-white/15 px-3 py-1 text-xs font-semibold text-white">
-                  {recipes.length} recetas visibles
+                  {recipes.length} recetas {visibleRecipeTypeText}
                 </span>
+                {isManagement && selectedRecipeIsDraft ? (
+                  <span className="rounded-full border border-[#FDBA74] bg-[#FFF7ED] px-3 py-1 text-xs font-semibold uppercase text-[#C2410C]">
+                    Borrador
+                  </span>
+                ) : null}
               </div>
               <h1 className="max-w-4xl text-4xl font-semibold leading-[1.02] text-white md:text-6xl">
                 {selectedProduct?.name ?? "Selecciona una receta"}
@@ -392,6 +408,11 @@ export default async function RecipeBookPage({
                 {selectedRecipe?.recipe_description ||
                   "Ficha visual de produccion con cantidades listas, ingredientes claros y paso a paso para ejecutar en cocina."}
               </p>
+              {isManagement && selectedRecipeIsDraft ? (
+                <p className="mt-4 max-w-2xl rounded-2xl border border-[#FDBA74] bg-[#FFF7ED] px-4 py-3 text-sm font-semibold leading-6 text-[#C2410C]">
+                  Esta receta esta en borrador. Puedes revisarla, pero no se puede producir hasta publicarla.
+                </p>
+              ) : null}
             </div>
           </div>
 
@@ -446,7 +467,7 @@ export default async function RecipeBookPage({
                 <button type="submit" className="ui-btn ui-btn--brand ui-btn--sm">
                   Recalcular
                 </button>
-                {canCreateBatch && selectedRecipe ? (
+                {canCreateBatch && selectedRecipe && selectedRecipeIsPublished ? (
                   <Link
                     href={`/production-batches/new?recipe_id=${encodeURIComponent(selectedRecipe.id)}&qty=${encodeURIComponent(String(productionQty))}`}
                     className="ui-btn ui-btn--primary ui-btn--sm"
@@ -455,7 +476,7 @@ export default async function RecipeBookPage({
                   </Link>
                 ) : (
                   <span className="ui-btn ui-btn--ghost ui-btn--sm pointer-events-none opacity-70">
-                    Solo lectura
+                    {selectedRecipeIsDraft ? "Borrador" : "Solo lectura"}
                   </span>
                 )}
               </div>
@@ -526,6 +547,7 @@ export default async function RecipeBookPage({
                 const area = one(recipe.areas);
                 const thumb = imageUrl(recipe);
                 const active = recipe.id === selectedRecipe?.id;
+                const isDraft = isDraftStatus(recipe.status);
                 return (
                   <Link
                     key={recipe.id}
@@ -556,15 +578,22 @@ export default async function RecipeBookPage({
                         {product?.name ?? "Producto"}
                       </div>
                       <div className="mt-2 text-xs text-[var(--ui-muted)]">{areaLabel(area)}</div>
-                      <div className="mt-3 inline-flex rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-[#C2410C]">
-                        {fmt(recipe.yield_qty)} {recipe.yield_unit}
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <span className="inline-flex rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-[#C2410C]">
+                          {fmt(recipe.yield_qty)} {recipe.yield_unit}
+                        </span>
+                        {isManagement && isDraft ? (
+                          <span className="inline-flex rounded-full border border-[#FDBA74] bg-[#FFF7ED] px-2.5 py-1 text-xs font-semibold uppercase text-[#C2410C]">
+                            Borrador
+                          </span>
+                        ) : null}
                       </div>
                     </div>
                   </Link>
                 );
               })}
               {recipes.length === 0 ? (
-                <div className="ui-empty">Esta area no tiene recetas publicadas.</div>
+                <div className="ui-empty">Esta area no tiene recetas visibles para tu rol.</div>
               ) : null}
             </div>
           </div>

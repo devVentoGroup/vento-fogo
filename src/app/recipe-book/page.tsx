@@ -88,7 +88,7 @@ function productImage(product: ProductShape | null | undefined) {
 
 function difficultyLabel(value: string | null | undefined) {
   const normalized = String(value ?? "").trim().toLowerCase();
-  if (!normalized) return "Sin dificultad";
+  if (!normalized) return "Simple";
   if (normalized === "facil") return "Facil";
   if (normalized === "medio") return "Media";
   if (normalized === "dificil") return "Dificil";
@@ -96,7 +96,7 @@ function difficultyLabel(value: string | null | undefined) {
 }
 
 function areaLabel(area: AreaShape | null | undefined) {
-  return area?.name || area?.kind || "Area";
+  return area?.name || area?.kind || "Sin area";
 }
 
 const PRODUCTION_RECIPE_AREA_KINDS = ["bodega", "cocina_caliente", "panaderia", "reposteria"];
@@ -172,6 +172,18 @@ function recipeHref(params: {
   return `/recipe-book${qs.toString() ? `?${qs.toString()}` : ""}`;
 }
 
+function mergeAreas(primary: AreaShape[], recipes: RecipeCardRow[]) {
+  const map = new Map<string, AreaShape>();
+  for (const area of primary) {
+    if (area?.id) map.set(area.id, area);
+  }
+  for (const recipe of recipes) {
+    const area = one(recipe.areas);
+    if (area?.id && !map.has(area.id)) map.set(area.id, area);
+  }
+  return Array.from(map.values());
+}
+
 export default async function RecipeBookPage({
   searchParams,
 }: {
@@ -212,12 +224,12 @@ export default async function RecipeBookPage({
       let query = supabase
         .from("recipe_cards")
         .select(
-          "id,product_id,site_id,area_id,yield_qty,yield_unit,portion_size,portion_unit,prep_time_minutes,shelf_life_days,difficulty,recipe_description,cover_image_path,status,products(id,name,sku,unit,stock_unit_code,image_url,catalog_image_url),areas(id,name,kind)"
+          "id,product_id,site_id,area_id,yield_qty,yield_unit,portion_size,portion_unit,prep_time_minutes,shelf_life_days,difficulty,recipe_description,cover_image_path,status,products(id,name,sku,unit,stock_unit_code,image_url,catalog_image_url),areas(id,code,name,kind,site_id)"
         )
         .eq("is_active", true)
         .eq("status", "published")
         .order("updated_at", { ascending: false })
-        .limit(160);
+        .limit(240);
       if (siteId) query = query.eq("site_id", siteId);
       return query;
     })(),
@@ -232,11 +244,13 @@ export default async function RecipeBookPage({
       .eq("is_active", true);
     recipeAreasData = (fallbackAreasData ?? []) as AreaShape[];
   }
-  const allowedAreaKinds = new Set(PRODUCTION_RECIPE_AREA_KINDS);
-  const areas = recipeAreasData
-    .filter((area) => isProductionRecipeArea(area, allowedAreaKinds))
-    .sort(sortProductionAreas);
+
   const allRecipes = (recipeRowsData ?? []) as RecipeCardRow[];
+  const allowedAreaKinds = new Set(PRODUCTION_RECIPE_AREA_KINDS);
+  const areas = mergeAreas(recipeAreasData, allRecipes)
+    .filter((area) => isProductionRecipeArea(area, allowedAreaKinds) || allRecipes.some((recipe) => recipe.area_id === area.id))
+    .sort(sortProductionAreas);
+
   const recipeCountByArea = new Map<string, number>();
   for (const recipe of allRecipes) {
     const areaId = String(recipe.area_id ?? "");
@@ -245,15 +259,15 @@ export default async function RecipeBookPage({
   }
 
   const currentAreaId = String(currentArea ?? "");
-  const firstAreaWithRecipes =
-    areas.find((area) => (recipeCountByArea.get(area.id) ?? 0) > 0)?.id ?? "";
-  const selectedAreaId =
-    isManagement
-      ? (requestedAreaId && areas.some((area) => area.id === requestedAreaId) ? requestedAreaId : "") ||
-        firstAreaWithRecipes ||
-        areas[0]?.id ||
-        ""
-      : (currentAreaId && areas.some((area) => area.id === currentAreaId) ? currentAreaId : "");
+  const currentAreaHasRecipes = currentAreaId && (recipeCountByArea.get(currentAreaId) ?? 0) > 0;
+  const requestedAreaIsValid = requestedAreaId && areas.some((area) => area.id === requestedAreaId);
+  const selectedAreaId = requestedAreaIsValid
+    ? requestedAreaId
+    : isManagement
+      ? ""
+      : currentAreaHasRecipes
+        ? currentAreaId
+        : "";
 
   const recipes = allRecipes.filter((recipe) =>
     selectedAreaId ? recipe.area_id === selectedAreaId : true
@@ -274,7 +288,7 @@ export default async function RecipeBookPage({
 
   const canCreateBatch = await checkPermission(supabase, APP_ID, "production.batches.create", {
     siteId,
-    areaId: selectedAreaId || null,
+    areaId: selectedAreaId || selectedRecipe?.area_id || null,
   });
 
   const [{ data: ingredientRows }, { data: stepRows }] = selectedRecipe
@@ -303,28 +317,62 @@ export default async function RecipeBookPage({
     const cost = Number(product?.cost ?? 0);
     return acc + (Number.isFinite(qty * cost) ? qty * cost : 0);
   }, 0);
-  const heroImage = imageUrl(selectedRecipe);
+
   const firstStepImage = steps.find((step) => step.image_path)?.image_path ?? "";
-  const coverImage = heroImage || firstStepImage;
+  const coverImage = imageUrl(selectedRecipe) || firstStepImage;
   const hasRecipes = allRecipes.length > 0;
-  const selectedAreaName = areaLabel(selectedArea);
+  const selectedAreaName = selectedArea ? areaLabel(selectedArea) : selectedAreaId ? "Area" : "Todas las areas";
   const baseYield = `${fmt(selectedRecipe?.yield_qty)} ${selectedRecipe?.yield_unit ?? "-"}`;
   const targetYield = `${fmt(productionQty)} ${selectedRecipe?.yield_unit ?? selectedProduct?.unit ?? "-"}`;
+  const totalMinutes = steps.reduce((acc, step) => acc + Number(step.time_minutes ?? 0), 0);
+
+  if (!hasRecipes) {
+    return (
+      <div className="space-y-6">
+        <section className="overflow-hidden rounded-[var(--ui-radius-card)] border border-[#FED7AA] bg-[#FFF7ED] shadow-[var(--ui-shadow-2)]">
+          <div className="grid gap-6 p-6 md:p-8 lg:grid-cols-[1fr_340px]">
+            <div>
+              <span className="inline-flex rounded-full bg-white px-3 py-1 text-xs font-semibold uppercase text-[#C2410C]">
+                Recetario FOGO
+              </span>
+              <h1 className="mt-4 max-w-3xl text-4xl font-semibold leading-tight text-[var(--ui-text)] md:text-6xl">
+                No hay recetas listas para producir
+              </h1>
+              <p className="mt-4 max-w-2xl text-base leading-7 text-[var(--ui-muted)] md:text-lg">
+                Cuando una receta este publicada, aparecera aqui como ficha visual para que el equipo pueda producirla paso a paso.
+              </p>
+            </div>
+            <div className="rounded-2xl border border-[#FDBA74] bg-white p-5 shadow-[var(--ui-shadow-soft)]">
+              <div className="text-sm font-semibold text-[var(--ui-text)]">Siguiente accion</div>
+              <p className="mt-2 text-sm leading-6 text-[var(--ui-muted)]">
+                Crea o publica una receta desde el administrador de recetas.
+              </p>
+              {isManagement ? (
+                <Link href="/recipes" className="ui-btn ui-btn--brand ui-btn--sm mt-4 w-full">
+                  Ir a recetas
+                </Link>
+              ) : null}
+            </div>
+          </div>
+        </section>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
       <section className="overflow-hidden rounded-[var(--ui-radius-card)] border border-[#E5D6C5] bg-[#FFFDFC] shadow-[var(--ui-shadow-2)]">
-        <div className="grid min-h-[420px] lg:grid-cols-[minmax(0,1fr)_420px]">
-          <div className="relative flex min-h-[420px] flex-col justify-end overflow-hidden bg-[#1F2937] p-6 text-white md:p-8">
+        <div className="grid min-h-[460px] lg:grid-cols-[minmax(0,1fr)_380px]">
+          <div className="relative flex min-h-[460px] flex-col justify-end overflow-hidden bg-[#1F2937] p-6 text-white md:p-8">
             {coverImage ? (
               <div
                 className="absolute inset-0 bg-cover bg-center"
-                style={{ backgroundImage: `url("${coverImage}")` }}
+                style={{ backgroundImage: `url(\"${coverImage}\")` }}
               />
             ) : (
-              <div className="absolute inset-0 bg-[linear-gradient(135deg,#1F2937_0%,#4B1F10_52%,#F59E0B_100%)]" />
+              <div className="absolute inset-0 bg-[linear-gradient(135deg,#111827_0%,#7C2D12_48%,#F97316_100%)]" />
             )}
-            <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(17,24,39,0.10)_0%,rgba(17,24,39,0.78)_100%)]" />
+            <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(17,24,39,0.12)_0%,rgba(17,24,39,0.86)_100%)]" />
             <div className="relative max-w-4xl">
               <div className="mb-5 flex flex-wrap gap-2">
                 <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold uppercase text-[#C2410C]">
@@ -334,53 +382,56 @@ export default async function RecipeBookPage({
                   {selectedAreaName}
                 </span>
                 <span className="rounded-full border border-white/30 bg-white/15 px-3 py-1 text-xs font-semibold text-white">
-                  {recipes.length} recetas
+                  {recipes.length} recetas visibles
                 </span>
               </div>
               <h1 className="max-w-4xl text-4xl font-semibold leading-[1.02] text-white md:text-6xl">
-                {selectedProduct?.name ?? "Recetario por area"}
+                {selectedProduct?.name ?? "Selecciona una receta"}
               </h1>
               <p className="mt-5 max-w-2xl text-base leading-7 text-white/88 md:text-lg">
                 {selectedRecipe?.recipe_description ||
-                  "Recetas publicadas por area, con ingredientes escalados y guia visual para producir con consistencia."}
+                  "Ficha visual de produccion con cantidades listas, ingredientes claros y paso a paso para ejecutar en cocina."}
               </p>
             </div>
           </div>
 
-          <aside className="flex flex-col justify-between border-t border-[#E5D6C5] bg-[#FFFDFC] p-6 lg:border-l lg:border-t-0 md:p-8">
+          <aside className="flex flex-col justify-between border-t border-[#E5D6C5] bg-white p-6 lg:border-l lg:border-t-0 md:p-7">
             <div>
-              <div className="text-xs font-semibold uppercase text-[#C2410C]">Ficha rapida</div>
-              <div className="mt-5 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-[#E5D6C5] bg-[#E5D6C5]">
-                <div className="bg-white p-4">
-                  <div className="text-xs font-semibold uppercase text-[var(--ui-muted)]">Base</div>
-                  <div className="mt-2 text-2xl font-semibold text-[var(--ui-text)]">{baseYield}</div>
+              <div className="text-xs font-semibold uppercase text-[#C2410C]">Produccion de hoy</div>
+              <div className="mt-5 grid gap-3">
+                <div className="rounded-2xl border border-[#FED7AA] bg-[#FFF7ED] p-4">
+                  <div className="text-xs font-semibold uppercase text-[#C2410C]">Cantidad objetivo</div>
+                  <div className="mt-2 text-4xl font-semibold text-[var(--ui-text)]">{targetYield}</div>
+                  <div className="mt-2 text-sm text-[var(--ui-muted)]">Base original: {baseYield}</div>
                 </div>
-                <div className="bg-white p-4">
-                  <div className="text-xs font-semibold uppercase text-[var(--ui-muted)]">Objetivo</div>
-                  <div className="mt-2 text-2xl font-semibold text-[var(--ui-text)]">{targetYield}</div>
-                </div>
-                <div className="bg-white p-4">
-                  <div className="text-xs font-semibold uppercase text-[var(--ui-muted)]">Tiempo</div>
-                  <div className="mt-2 text-2xl font-semibold text-[var(--ui-text)]">
-                    {selectedRecipe?.prep_time_minutes ? `${fmt(selectedRecipe.prep_time_minutes, 0)} min` : "-"}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-2xl border border-[var(--ui-border)] bg-[#FBFCFD] p-4">
+                    <div className="text-xs font-semibold uppercase text-[var(--ui-muted)]">Tiempo</div>
+                    <div className="mt-2 text-2xl font-semibold text-[var(--ui-text)]">
+                      {selectedRecipe?.prep_time_minutes
+                        ? `${fmt(selectedRecipe.prep_time_minutes, 0)} min`
+                        : totalMinutes > 0
+                          ? `${fmt(totalMinutes, 0)} min`
+                          : "-"}
+                    </div>
                   </div>
-                </div>
-                <div className="bg-white p-4">
-                  <div className="text-xs font-semibold uppercase text-[var(--ui-muted)]">Dificultad</div>
-                  <div className="mt-2 text-2xl font-semibold text-[var(--ui-text)]">
-                    {difficultyLabel(selectedRecipe?.difficulty)}
+                  <div className="rounded-2xl border border-[var(--ui-border)] bg-[#FBFCFD] p-4">
+                    <div className="text-xs font-semibold uppercase text-[var(--ui-muted)]">Nivel</div>
+                    <div className="mt-2 text-2xl font-semibold text-[var(--ui-text)]">
+                      {difficultyLabel(selectedRecipe?.difficulty)}
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
 
-            <form className="mt-6 space-y-3 rounded-lg border border-[#FED7AA] bg-[#FFF7ED] p-4">
+            <form className="mt-6 space-y-3 rounded-2xl border border-[#E5D6C5] bg-[#FFFDFC] p-4">
               {siteId ? <input type="hidden" name="site_id" value={siteId} /> : null}
               {selectedAreaId ? <input type="hidden" name="area_id" value={selectedAreaId} /> : null}
               {selectedRecipe ? <input type="hidden" name="recipe_id" value={selectedRecipe.id} /> : null}
               <label>
                 <span className="ui-label">
-                  Cantidad a producir ({selectedRecipe?.yield_unit ?? selectedProduct?.unit ?? "un"})
+                  Cambiar cantidad ({selectedRecipe?.yield_unit ?? selectedProduct?.unit ?? "un"})
                 </span>
                 <input
                   className="ui-input mt-1 bg-white text-xl font-semibold"
@@ -393,7 +444,7 @@ export default async function RecipeBookPage({
               </label>
               <div className="grid grid-cols-2 gap-2">
                 <button type="submit" className="ui-btn ui-btn--brand ui-btn--sm">
-                  Calcular
+                  Recalcular
                 </button>
                 {canCreateBatch && selectedRecipe ? (
                   <Link
@@ -404,7 +455,7 @@ export default async function RecipeBookPage({
                   </Link>
                 ) : (
                   <span className="ui-btn ui-btn--ghost ui-btn--sm pointer-events-none opacity-70">
-                    Sin permiso
+                    Solo lectura
                   </span>
                 )}
               </div>
@@ -413,102 +464,108 @@ export default async function RecipeBookPage({
         </div>
       </section>
 
-      {isManagement ? (
-        <section className="space-y-3 rounded-[var(--ui-radius-card)] border border-[var(--ui-border)] bg-white p-4 shadow-[var(--ui-shadow-soft)]">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 className="ui-h2">Areas de produccion</h2>
+      <section className="rounded-[var(--ui-radius-card)] border border-[var(--ui-border)] bg-white p-4 shadow-[var(--ui-shadow-soft)]">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="ui-h2">Elegir area</h2>
+            <p className="mt-1 text-sm text-[var(--ui-muted)]">Vista rapida para encontrar la receta correcta.</p>
+          </div>
+          {isManagement ? (
             <Link href="/recipes" className="ui-btn ui-btn--ghost ui-btn--sm">
               Admin recetas
             </Link>
-          </div>
-          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-            {areas.map((area) => {
-              const count = recipeCountByArea.get(area.id) ?? 0;
-              return (
-                <Link
-                  key={area.id}
-                  href={recipeHref({ siteId, areaId: area.id })}
-                  className={`rounded-lg border px-4 py-3 transition ${
-                    area.id === selectedAreaId
-                      ? "border-[#F97316] bg-[#FFF7ED] shadow-[var(--ui-shadow-soft)]"
-                      : "border-[var(--ui-border)] bg-[#FBFCFD] hover:border-[#FDBA74] hover:bg-white"
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="text-sm font-semibold text-[var(--ui-text)]">{areaLabel(area)}</div>
-                    <div className="text-2xl font-semibold text-[#C2410C]">{count}</div>
-                  </div>
-                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[#E5D6C5]">
-                    <div
-                      className="h-full rounded-full bg-[#F97316]"
-                      style={{ width: `${Math.min(100, count * 18)}%` }}
-                    />
-                  </div>
-                </Link>
-              );
-            })}
-            {areas.length === 0 ? (
-              <div className="ui-empty w-full">No hay areas disponibles para tu usuario.</div>
-            ) : null}
-          </div>
-        </section>
-      ) : (
-        <section className="rounded-lg border border-[#FED7AA] bg-[#FFF7ED] px-4 py-3">
-          <div className="text-xs font-semibold uppercase text-[#C2410C]">Tu area</div>
-          <div className="mt-1 text-base font-semibold text-[var(--ui-text)]">
-            {areaLabel(selectedArea)}
-          </div>
-        </section>
-      )}
+          ) : null}
+        </div>
+        <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
+          <Link
+            href={recipeHref({ siteId })}
+            className={`shrink-0 rounded-2xl border px-4 py-3 transition ${
+              !selectedAreaId
+                ? "border-[#F97316] bg-[#FFF7ED] shadow-[var(--ui-shadow-soft)]"
+                : "border-[var(--ui-border)] bg-[#FBFCFD] hover:border-[#FDBA74] hover:bg-white"
+            }`}
+          >
+            <div className="text-sm font-semibold text-[var(--ui-text)]">Todas</div>
+            <div className="mt-1 text-2xl font-semibold text-[#C2410C]">{allRecipes.length}</div>
+          </Link>
+          {areas.map((area) => {
+            const count = recipeCountByArea.get(area.id) ?? 0;
+            return (
+              <Link
+                key={area.id}
+                href={recipeHref({ siteId, areaId: area.id })}
+                className={`shrink-0 rounded-2xl border px-4 py-3 transition ${
+                  area.id === selectedAreaId
+                    ? "border-[#F97316] bg-[#FFF7ED] shadow-[var(--ui-shadow-soft)]"
+                    : "border-[var(--ui-border)] bg-[#FBFCFD] hover:border-[#FDBA74] hover:bg-white"
+                }`}
+              >
+                <div className="max-w-[180px] truncate text-sm font-semibold text-[var(--ui-text)]">
+                  {areaLabel(area)}
+                </div>
+                <div className="mt-1 text-2xl font-semibold text-[#C2410C]">{count}</div>
+              </Link>
+            );
+          })}
+        </div>
+      </section>
 
-      <section className="grid gap-6 xl:grid-cols-[340px_1fr]">
+      <section className="grid gap-6 xl:grid-cols-[380px_1fr]">
         <aside className="space-y-4 xl:sticky xl:top-24 xl:h-fit">
           <div className="rounded-[var(--ui-radius-card)] border border-[var(--ui-border)] bg-white p-4 shadow-[var(--ui-shadow-soft)]">
             <div className="flex items-center justify-between">
-              <h2 className="ui-h2">Indice</h2>
+              <div>
+                <h2 className="ui-h2">Recetas</h2>
+                <p className="mt-1 text-sm text-[var(--ui-muted)]">Toca una tarjeta para verla.</p>
+              </div>
               <span className="ui-chip ui-chip--brand">{recipes.length}</span>
             </div>
             <div className="mt-4 grid gap-3">
-            {recipes.map((recipe) => {
-              const product = one(recipe.products);
-              const thumb = imageUrl(recipe);
-              const active = recipe.id === selectedRecipe?.id;
-              return (
-                <Link
-                  key={recipe.id}
-                  href={recipeHref({
-                    siteId,
-                    areaId: selectedAreaId,
-                    recipeId: recipe.id,
-                    qty: productionQty,
-                  })}
-                  className={`grid grid-cols-[74px_1fr] gap-3 rounded-lg border p-2.5 transition ${
-                    active
-                      ? "border-[#F97316] bg-[#FFF7ED] shadow-[var(--ui-shadow-soft)]"
-                      : "border-[var(--ui-border)] bg-[#FBFCFD] hover:border-[#FDBA74] hover:bg-white"
-                  }`}
-                >
-                  <div
-                    className="h-[74px] rounded-md bg-[#FFF7ED] bg-cover bg-center"
-                    style={thumb ? { backgroundImage: `url("${thumb}")` } : undefined}
-                  />
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-semibold text-[var(--ui-text)]">
-                      {product?.name ?? "Producto"}
+              {recipes.map((recipe) => {
+                const product = one(recipe.products);
+                const area = one(recipe.areas);
+                const thumb = imageUrl(recipe);
+                const active = recipe.id === selectedRecipe?.id;
+                return (
+                  <Link
+                    key={recipe.id}
+                    href={recipeHref({
+                      siteId,
+                      areaId: selectedAreaId,
+                      recipeId: recipe.id,
+                      qty: productionQty,
+                    })}
+                    className={`grid grid-cols-[92px_1fr] gap-3 rounded-2xl border p-3 transition ${
+                      active
+                        ? "border-[#F97316] bg-[#FFF7ED] shadow-[var(--ui-shadow-soft)]"
+                        : "border-[var(--ui-border)] bg-[#FBFCFD] hover:border-[#FDBA74] hover:bg-white"
+                    }`}
+                  >
+                    <div
+                      className="h-[92px] overflow-hidden rounded-xl bg-[#FFF7ED] bg-cover bg-center"
+                      style={thumb ? { backgroundImage: `url(\"${thumb}\")` } : undefined}
+                    >
+                      {!thumb ? (
+                        <div className="flex h-full items-center justify-center text-xl font-semibold text-[#C2410C]">
+                          {String(product?.name ?? "R").trim().charAt(0).toUpperCase() || "R"}
+                        </div>
+                      ) : null}
                     </div>
-                    <div className="mt-1 text-xs text-[var(--ui-muted)]">{product?.sku ?? "-"}</div>
-                    <div className="mt-2 text-xs font-semibold text-[#C2410C]">
-                      {fmt(recipe.yield_qty)} {recipe.yield_unit} base
+                    <div className="min-w-0 py-1">
+                      <div className="line-clamp-2 text-base font-semibold leading-5 text-[var(--ui-text)]">
+                        {product?.name ?? "Producto"}
+                      </div>
+                      <div className="mt-2 text-xs text-[var(--ui-muted)]">{areaLabel(area)}</div>
+                      <div className="mt-3 inline-flex rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-[#C2410C]">
+                        {fmt(recipe.yield_qty)} {recipe.yield_unit}
+                      </div>
                     </div>
-                  </div>
-                </Link>
-              );
-            })}
-            {!hasRecipes ? (
-              <div className="ui-empty">No hay recetas publicadas para tu sede.</div>
-            ) : recipes.length === 0 ? (
-              <div className="ui-empty">Esta area no tiene recetas publicadas.</div>
-            ) : null}
+                  </Link>
+                );
+              })}
+              {recipes.length === 0 ? (
+                <div className="ui-empty">Esta area no tiene recetas publicadas.</div>
+              ) : null}
             </div>
           </div>
         </aside>
@@ -517,8 +574,8 @@ export default async function RecipeBookPage({
           <section className="rounded-[var(--ui-radius-card)] border border-[var(--ui-border)] bg-white p-5 shadow-[var(--ui-shadow-1)] md:p-6">
             <div className="flex flex-wrap items-end justify-between gap-3">
               <div>
-                <div className="text-xs font-semibold uppercase text-[#C2410C]">Mise en place</div>
-                <h2 className="mt-1 text-3xl font-semibold text-[var(--ui-text)]">Ingredientes escalados</h2>
+                <div className="text-xs font-semibold uppercase text-[#C2410C]">1. Alistar</div>
+                <h2 className="mt-1 text-3xl font-semibold text-[var(--ui-text)]">Ingredientes</h2>
               </div>
               <div className="text-right">
                 <div className="text-xs font-semibold uppercase text-[var(--ui-muted)]">Costo estimado</div>
@@ -533,30 +590,30 @@ export default async function RecipeBookPage({
                 const unit = product?.stock_unit_code || product?.unit || "-";
                 return (
                   <div
-                    key={row.ingredient_product_id}
-                    className="grid grid-cols-[64px_1fr_auto] items-center gap-3 rounded-lg border border-[var(--ui-border)] bg-[#FBFCFD] p-3"
+                    key={`${row.ingredient_product_id}-${index}`}
+                    className="grid grid-cols-[72px_1fr_auto] items-center gap-3 rounded-2xl border border-[var(--ui-border)] bg-[#FBFCFD] p-3"
                   >
                     <div
-                      className="flex h-16 w-16 items-center justify-center rounded-md bg-[#FFF7ED] bg-cover bg-center text-sm font-semibold text-[#C2410C]"
-                      style={thumb ? { backgroundImage: `url("${thumb}")` } : undefined}
+                      className="flex h-[72px] w-[72px] items-center justify-center rounded-xl bg-[#FFF7ED] bg-cover bg-center text-lg font-semibold text-[#C2410C]"
+                      style={thumb ? { backgroundImage: `url(\"${thumb}\")` } : undefined}
                     >
                       {!thumb ? index + 1 : null}
                     </div>
                     <div className="min-w-0">
-                      <div className="truncate text-sm font-semibold text-[var(--ui-text)]">
+                      <div className="line-clamp-2 text-base font-semibold leading-5 text-[var(--ui-text)]">
                         {product?.name ?? "Ingrediente"}
                       </div>
                       <div className="mt-1 text-xs text-[var(--ui-muted)]">{product?.sku ?? "-"}</div>
                     </div>
                     <div className="text-right">
-                      <div className="text-xl font-semibold text-[var(--ui-text)]">{fmt(requiredQty, 3)}</div>
+                      <div className="text-2xl font-semibold text-[var(--ui-text)]">{fmt(requiredQty, 3)}</div>
                       <div className="text-xs font-semibold text-[#C2410C]">{unit}</div>
                     </div>
                   </div>
                 );
               })}
               {ingredients.length === 0 ? (
-                <div className="ui-empty md:col-span-2">Esta receta no tiene ingredientes publicados.</div>
+                <div className="ui-empty md:col-span-2">Esta receta aun no tiene ingredientes publicados.</div>
               ) : null}
             </div>
           </section>
@@ -564,7 +621,7 @@ export default async function RecipeBookPage({
           <section className="rounded-[var(--ui-radius-card)] border border-[var(--ui-border)] bg-white p-5 shadow-[var(--ui-shadow-1)] md:p-6">
             <div className="flex flex-wrap items-end justify-between gap-3">
               <div>
-                <div className="text-xs font-semibold uppercase text-[#C2410C]">Guia visual</div>
+                <div className="text-xs font-semibold uppercase text-[#C2410C]">2. Preparar</div>
                 <h2 className="mt-1 text-3xl font-semibold text-[var(--ui-text)]">Paso a paso</h2>
               </div>
               <span className="ui-chip">{steps.length} pasos</span>
@@ -573,38 +630,42 @@ export default async function RecipeBookPage({
               {steps.map((step) => (
                 <article
                   key={step.id}
-                  className="grid overflow-hidden rounded-lg border border-[#E5D6C5] bg-[#FFFDFC] shadow-[var(--ui-shadow-soft)] md:grid-cols-[320px_1fr]"
+                  className="overflow-hidden rounded-3xl border border-[#E5D6C5] bg-[#FFFDFC] shadow-[var(--ui-shadow-soft)]"
                 >
-                  <div
-                    className="min-h-[240px] bg-[#FFF7ED] bg-cover bg-center"
-                    style={step.image_path ? { backgroundImage: `url("${step.image_path}")` } : undefined}
-                  >
-                    {!step.image_path ? (
-                      <div className="flex h-full min-h-[240px] items-center justify-center text-sm font-semibold text-[#C2410C]">
-                        Foto pendiente
-                      </div>
-                    ) : null}
-                  </div>
-                  <div className="p-6">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="flex h-11 w-11 items-center justify-center rounded-full bg-[#F97316] text-base font-semibold text-white">
-                        {step.step_number}
-                      </span>
-                      {step.time_minutes != null ? (
-                        <span className="ui-chip">{fmt(step.time_minutes, 0)} min</span>
+                  <div className="grid md:grid-cols-[360px_1fr]">
+                    <div
+                      className="min-h-[260px] bg-[#FFF7ED] bg-cover bg-center"
+                      style={step.image_path ? { backgroundImage: `url(\"${step.image_path}\")` } : undefined}
+                    >
+                      {!step.image_path ? (
+                        <div className="flex h-full min-h-[260px] items-center justify-center text-base font-semibold text-[#C2410C]">
+                          Foto pendiente
+                        </div>
                       ) : null}
                     </div>
-                    <p className="mt-5 text-lg leading-8 text-[var(--ui-text)]">{step.description}</p>
-                    {step.tip ? (
-                      <p className="mt-5 rounded-lg border border-[#FED7AA] bg-[#FFF7ED] p-4 text-sm font-semibold leading-6 text-[#C2410C]">
-                        {step.tip}
-                      </p>
-                    ) : null}
+                    <div className="p-6 md:p-7">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="flex h-14 w-14 items-center justify-center rounded-full bg-[#F97316] text-2xl font-semibold text-white">
+                          {step.step_number}
+                        </span>
+                        {step.time_minutes != null ? (
+                          <span className="rounded-full border border-[#FED7AA] bg-[#FFF7ED] px-3 py-1 text-sm font-semibold text-[#C2410C]">
+                            {fmt(step.time_minutes, 0)} min
+                          </span>
+                        ) : null}
+                      </div>
+                      <p className="mt-5 text-xl leading-9 text-[var(--ui-text)]">{step.description}</p>
+                      {step.tip ? (
+                        <p className="mt-5 rounded-2xl border border-[#FED7AA] bg-[#FFF7ED] p-4 text-base font-semibold leading-7 text-[#C2410C]">
+                          {step.tip}
+                        </p>
+                      ) : null}
+                    </div>
                   </div>
                 </article>
               ))}
               {steps.length === 0 ? (
-                <div className="ui-empty">Esta receta no tiene pasos publicados.</div>
+                <div className="ui-empty">Esta receta aun no tiene pasos publicados.</div>
               ) : null}
             </div>
           </section>

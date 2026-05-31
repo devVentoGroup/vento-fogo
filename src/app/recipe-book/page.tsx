@@ -6,6 +6,7 @@ import { checkPermission } from "@/lib/auth/permissions";
 export const dynamic = "force-dynamic";
 
 const APP_ID = "fogo";
+const UNASSIGNED_SITE_ID = "__sin_sede__";
 const UNASSIGNED_AREA_ID = "__sin_area__";
 
 type Relation<T> = T | T[] | null | undefined;
@@ -31,6 +32,12 @@ type AreaShape = {
   name: string | null;
   kind: string | null;
   site_id?: string | null;
+};
+
+type SiteShape = {
+  id: string;
+  name: string | null;
+  site_type?: string | null;
 };
 
 type RecipeCardRow = {
@@ -116,6 +123,10 @@ function areaLabel(area: AreaShape | null | undefined) {
   return area?.name || area?.kind || "Sin area";
 }
 
+function siteLabel(site: SiteShape | null | undefined) {
+  return site?.name || site?.site_type || "Sin sede";
+}
+
 const PRODUCTION_RECIPE_AREA_KINDS = ["bodega", "cocina_caliente", "panaderia", "reposteria"];
 const PRODUCTION_RECIPE_AREA_ORDER = new Map(
   PRODUCTION_RECIPE_AREA_KINDS.map((kind, index) => [kind, index])
@@ -180,16 +191,18 @@ function sortProductionAreas(a: AreaShape, b: AreaShape) {
 }
 
 function recipeHref(params: {
-  siteId: string;
+  siteId?: string | null;
   areaId?: string | null;
   recipeId?: string | null;
   qty?: number | null;
+  status?: string | null;
 }) {
   const qs = new URLSearchParams();
   if (params.siteId) qs.set("site_id", params.siteId);
   if (params.areaId) qs.set("area_id", params.areaId);
   if (params.recipeId) qs.set("recipe_id", params.recipeId);
   if (params.qty && params.qty > 0) qs.set("qty", String(params.qty));
+  if (params.status && params.status !== "all") qs.set("status", params.status);
   return `/recipe-book${qs.toString() ? `?${qs.toString()}` : ""}`;
 }
 
@@ -213,6 +226,7 @@ export default async function RecipeBookPage({
     area_id?: string;
     recipe_id?: string;
     qty?: string;
+    status?: string;
   }>;
 }) {
   const sp = (await searchParams) ?? {};
@@ -220,6 +234,7 @@ export default async function RecipeBookPage({
   const requestedAreaId = String(sp.area_id ?? "").trim();
   const requestedRecipeId = String(sp.recipe_id ?? "").trim();
   const requestedQty = Number(String(sp.qty ?? "").trim());
+  const requestedStatus = String(sp.status ?? "").trim().toLowerCase();
 
   const { supabase, user } = await requireAppAccess({
     appId: APP_ID,
@@ -233,13 +248,24 @@ export default async function RecipeBookPage({
     supabase.from("employees").select("role").eq("id", user.id).maybeSingle(),
   ]);
 
-  const siteId = requestedSiteId || String(currentSite ?? "");
+  const currentSiteId = String(currentSite ?? "");
   const role = String(employeeRow?.role ?? "").trim();
-  const isManagement = ["propietario", "gerente_general", "gerente"].includes(role);
+  const isOwnerScope = ["propietario", "gerente_general"].includes(role);
+  const isManagement = isOwnerScope || role === "gerente";
+  const siteFilterIsUnassigned = isOwnerScope && requestedSiteId === UNASSIGNED_SITE_ID;
+  const siteId = isOwnerScope
+    ? (siteFilterIsUnassigned ? UNASSIGNED_SITE_ID : requestedSiteId)
+    : (requestedSiteId || currentSiteId);
+  const areaOptionsSiteId = siteFilterIsUnassigned ? "" : siteId;
+  const selectedStatus =
+    isManagement && (requestedStatus === "published" || requestedStatus === "draft")
+      ? requestedStatus
+      : "all";
+  const allowedStatuses = isManagement ? ["published", "draft"] : ["published"];
 
-  const [{ data: rpcAreasData }, { data: recipeRowsData }] = await Promise.all([
-    siteId
-      ? supabase.rpc("fogo_recipe_area_options", { p_site_id: siteId })
+  const [{ data: rpcAreasData }, { data: recipeRowsData }, { data: siteRowsData }] = await Promise.all([
+    areaOptionsSiteId
+      ? supabase.rpc("fogo_recipe_area_options", { p_site_id: areaOptionsSiteId })
       : Promise.resolve({ data: [] as AreaShape[] }),
     (() => {
       let query = supabase
@@ -248,32 +274,58 @@ export default async function RecipeBookPage({
           "id,product_id,site_id,area_id,yield_qty,yield_unit,portion_size,portion_unit,prep_time_minutes,shelf_life_days,difficulty,recipe_description,cover_image_path,status,products(id,name,sku,unit,stock_unit_code,image_url,catalog_image_url),areas(id,code,name,kind,site_id)"
         )
         .eq("is_active", true)
-        .in("status", isManagement ? ["published", "draft"] : ["published"])
+        .in("status", allowedStatuses)
         .order("updated_at", { ascending: false })
-        .limit(800);
+        .limit(1000);
 
-      if (siteId) {
-        query = isManagement ? query.or(`site_id.eq.${siteId},site_id.is.null`) : query.eq("site_id", siteId);
+      if (!isOwnerScope && areaOptionsSiteId) {
+        query = query.eq("site_id", areaOptionsSiteId);
       }
 
       return query;
     })(),
+    isOwnerScope
+      ? supabase.from("sites").select("id,name,site_type").order("name", { ascending: true }).limit(200)
+      : Promise.resolve({ data: [] as SiteShape[] }),
   ]);
 
+  const siteOptions = (siteRowsData ?? []) as SiteShape[];
+
   let recipeAreasData = (rpcAreasData ?? []) as AreaShape[];
-  if (siteId && recipeAreasData.length === 0) {
+  if (areaOptionsSiteId && recipeAreasData.length === 0) {
     const { data: fallbackAreasData } = await supabase
       .from("areas")
       .select("id,code,name,kind,site_id")
-      .eq("site_id", siteId)
+      .eq("site_id", areaOptionsSiteId)
       .eq("is_active", true);
     recipeAreasData = (fallbackAreasData ?? []) as AreaShape[];
   }
 
-  const allRecipes = (recipeRowsData ?? []) as RecipeCardRow[];
+  const rawRecipes = (recipeRowsData ?? []) as RecipeCardRow[];
+  const matchesSelectedStatus = (recipe: RecipeCardRow) => {
+    if (!isManagement) return isPublishedStatus(recipe.status);
+    if (selectedStatus === "published") return isPublishedStatus(recipe.status);
+    if (selectedStatus === "draft") return isDraftStatus(recipe.status);
+    return isPublishedStatus(recipe.status) || isDraftStatus(recipe.status);
+  };
+  const matchesSelectedSite = (recipe: RecipeCardRow) => {
+    if (!isOwnerScope) return true;
+    if (siteFilterIsUnassigned) return !recipe.site_id;
+    return siteId ? recipe.site_id === siteId : true;
+  };
+  const statusFilteredRecipes = rawRecipes.filter(matchesSelectedStatus);
+  const siteScopedRecipesForStatus = rawRecipes.filter(matchesSelectedSite);
+  const allRecipes = siteScopedRecipesForStatus.filter(matchesSelectedStatus);
+
   const allowedAreaKinds = new Set(PRODUCTION_RECIPE_AREA_KINDS);
   const areas = mergeAreas(recipeAreasData, allRecipes)
-    .filter((area) => isProductionRecipeArea(area, allowedAreaKinds) || allRecipes.some((recipe) => recipe.area_id === area.id))
+    .filter((area) => {
+      const areaSiteId = String(area.site_id ?? "");
+      if (isOwnerScope && siteId && !siteFilterIsUnassigned && areaSiteId && areaSiteId !== siteId) {
+        return false;
+      }
+      return isProductionRecipeArea(area, allowedAreaKinds) || allRecipes.some((recipe) => recipe.area_id === area.id);
+    })
     .sort(sortProductionAreas);
 
   const recipeCountByArea = new Map<string, number>();
@@ -285,6 +337,17 @@ export default async function RecipeBookPage({
       continue;
     }
     recipeCountByArea.set(areaId, (recipeCountByArea.get(areaId) ?? 0) + 1);
+  }
+
+  const recipeCountBySite = new Map<string, number>();
+  let recipesWithoutSiteCount = 0;
+  for (const recipe of statusFilteredRecipes) {
+    const recipeSiteId = String(recipe.site_id ?? "");
+    if (!recipeSiteId) {
+      recipesWithoutSiteCount += 1;
+      continue;
+    }
+    recipeCountBySite.set(recipeSiteId, (recipeCountBySite.get(recipeSiteId) ?? 0) + 1);
   }
 
   const currentAreaId = String(currentArea ?? "");
@@ -319,8 +382,10 @@ export default async function RecipeBookPage({
 
   const selectedRecipeIsDraft = isDraftStatus(selectedRecipe?.status);
   const selectedRecipeIsPublished = isPublishedStatus(selectedRecipe?.status);
+  const permissionSiteId =
+    selectedRecipe?.site_id || (siteFilterIsUnassigned ? "" : siteId) || currentSiteId;
   const canCreateBatch = await checkPermission(supabase, APP_ID, "production.batches.create", {
-    siteId,
+    siteId: permissionSiteId,
     areaId: selectedRecipe?.area_id || selectedAreaId || null,
   });
 
@@ -375,6 +440,17 @@ export default async function RecipeBookPage({
   const firstStepImage = steps.find((step) => step.image_path)?.image_path ?? "";
   const coverImage = imageUrl(selectedRecipe) || firstStepImage;
   const hasRecipes = allRecipes.length > 0;
+  const selectedSite =
+    isOwnerScope && !siteFilterIsUnassigned && siteId
+      ? siteOptions.find((site) => site.id === siteId) ?? null
+      : null;
+  const selectedSiteName = siteFilterIsUnassigned
+    ? "Sin sede"
+    : selectedSite
+      ? siteLabel(selectedSite)
+      : isOwnerScope
+        ? "Todas las sedes"
+        : "";
   const selectedAreaName =
     selectedAreaId === UNASSIGNED_AREA_ID
       ? "Sin area"
@@ -383,10 +459,17 @@ export default async function RecipeBookPage({
         : selectedAreaId
           ? "Area"
           : "Todas las areas";
+
   const baseYield = `${fmt(selectedRecipe?.yield_qty)} ${selectedRecipe?.yield_unit ?? "-"}`;
   const targetYield = `${fmt(productionQty)} ${selectedRecipe?.yield_unit ?? selectedProduct?.unit ?? "-"}`;
   const totalMinutes = steps.reduce((acc, step) => acc + Number(step.time_minutes ?? 0), 0);
-  const visibleRecipeTypeText = isManagement ? "publicadas y borradores" : "publicadas";
+  const visibleRecipeTypeText = !isManagement
+    ? "publicadas"
+    : selectedStatus === "draft"
+      ? "borradores"
+      : selectedStatus === "published"
+        ? "publicadas"
+        : "publicadas y borradores";
   const portionSize = Number(selectedRecipe?.portion_size ?? 0);
   const portionUnit =
     selectedRecipe?.portion_unit || selectedRecipe?.yield_unit || selectedProduct?.unit || "un";
@@ -455,6 +538,11 @@ export default async function RecipeBookPage({
                 <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold uppercase text-[#C2410C] shadow-sm">
                   Recetario FOGO
                 </span>
+                {isOwnerScope ? (
+                  <span className="rounded-full border border-[#FED7AA] bg-white/80 px-3 py-1 text-xs font-semibold text-[#9A3412]">
+                    {selectedSiteName}
+                  </span>
+                ) : null}
                 <span className="rounded-full border border-[#FED7AA] bg-white/80 px-3 py-1 text-xs font-semibold text-[#9A3412]">
                   {selectedAreaName}
                 </span>
@@ -489,6 +577,7 @@ export default async function RecipeBookPage({
             <form className="mt-3 space-y-3">
               {siteId ? <input type="hidden" name="site_id" value={siteId} /> : null}
               {selectedAreaId ? <input type="hidden" name="area_id" value={selectedAreaId} /> : null}
+              {selectedStatus !== "all" ? <input type="hidden" name="status" value={selectedStatus} /> : null}
               {selectedRecipe ? <input type="hidden" name="recipe_id" value={selectedRecipe.id} /> : null}
 
               <label>
@@ -561,8 +650,12 @@ export default async function RecipeBookPage({
       <section className="rounded-[var(--ui-radius-card)] border border-[var(--ui-border)] bg-white p-4 shadow-[var(--ui-shadow-soft)]">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="ui-h2">Elegir area</h2>
-            <p className="mt-1 text-sm text-[var(--ui-muted)]">Encuentra rapido la receta que necesitas preparar.</p>
+            <h2 className="ui-h2">Filtros del recetario</h2>
+            <p className="mt-1 text-sm text-[var(--ui-muted)]">
+              {isOwnerScope
+                ? "Puedes ver todas las recetas, o filtrar por sede, area y estado."
+                : "Encuentra rapido la receta que necesitas preparar."}
+            </p>
           </div>
           {isManagement ? (
             <Link href="/recipes" className="ui-btn ui-btn--ghost ui-btn--sm">
@@ -570,49 +663,131 @@ export default async function RecipeBookPage({
             </Link>
           ) : null}
         </div>
-        <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
-          <Link
-            href={recipeHref({ siteId })}
-            className={`shrink-0 rounded-2xl border px-4 py-3 transition ${!selectedAreaId
-                ? "border-[#F97316] bg-[#FFF7ED] shadow-[var(--ui-shadow-soft)]"
-                : "border-[var(--ui-border)] bg-[#FBFCFD] hover:border-[#FDBA74] hover:bg-white"
-              }`}
-          >
-            <div className="text-sm font-semibold text-[var(--ui-text)]">Todas</div>
-            <div className="mt-1 text-2xl font-semibold text-[#C2410C]">{allRecipes.length}</div>
-          </Link>
 
-          {recipesWithoutAreaCount > 0 ? (
+        {isOwnerScope ? (
+          <div className="mt-4 space-y-3">
+            <div>
+              <div className="text-xs font-semibold uppercase text-[var(--ui-muted)]">Sede</div>
+              <div className="mt-2 flex gap-2 overflow-x-auto pb-1">
+                <Link
+                  href={recipeHref({ status: selectedStatus })}
+                  className={`shrink-0 rounded-2xl border px-4 py-3 transition ${!siteId
+                      ? "border-[#F97316] bg-[#FFF7ED] shadow-[var(--ui-shadow-soft)]"
+                      : "border-[var(--ui-border)] bg-[#FBFCFD] hover:border-[#FDBA74] hover:bg-white"
+                    }`}
+                >
+                  <div className="text-sm font-semibold text-[var(--ui-text)]">Todas las sedes</div>
+                  <div className="mt-1 text-2xl font-semibold text-[#C2410C]">{statusFilteredRecipes.length}</div>
+                </Link>
+
+                {recipesWithoutSiteCount > 0 ? (
+                  <Link
+                    href={recipeHref({ siteId: UNASSIGNED_SITE_ID, status: selectedStatus })}
+                    className={`shrink-0 rounded-2xl border px-4 py-3 transition ${siteFilterIsUnassigned
+                        ? "border-[#F97316] bg-[#FFF7ED] shadow-[var(--ui-shadow-soft)]"
+                        : "border-[var(--ui-border)] bg-[#FBFCFD] hover:border-[#FDBA74] hover:bg-white"
+                      }`}
+                  >
+                    <div className="text-sm font-semibold text-[var(--ui-text)]">Sin sede</div>
+                    <div className="mt-1 text-2xl font-semibold text-[#C2410C]">{recipesWithoutSiteCount}</div>
+                  </Link>
+                ) : null}
+
+                {siteOptions.map((site) => {
+                  const count = recipeCountBySite.get(site.id) ?? 0;
+                  return (
+                    <Link
+                      key={site.id}
+                      href={recipeHref({ siteId: site.id, status: selectedStatus })}
+                      className={`shrink-0 rounded-2xl border px-4 py-3 transition ${site.id === siteId
+                          ? "border-[#F97316] bg-[#FFF7ED] shadow-[var(--ui-shadow-soft)]"
+                          : "border-[var(--ui-border)] bg-[#FBFCFD] hover:border-[#FDBA74] hover:bg-white"
+                        }`}
+                    >
+                      <div className="max-w-[190px] truncate text-sm font-semibold text-[var(--ui-text)]">
+                        {siteLabel(site)}
+                      </div>
+                      <div className="mt-1 text-2xl font-semibold text-[#C2410C]">{count}</div>
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div>
+              <div className="text-xs font-semibold uppercase text-[var(--ui-muted)]">Estado</div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {[
+                  { value: "all", label: "Todas", count: siteScopedRecipesForStatus.length },
+                  { value: "published", label: "Publicadas", count: siteScopedRecipesForStatus.filter((recipe) => isPublishedStatus(recipe.status)).length },
+                  { value: "draft", label: "Borradores", count: siteScopedRecipesForStatus.filter((recipe) => isDraftStatus(recipe.status)).length },
+                ].map((option) => (
+                  <Link
+                    key={option.value}
+                    href={recipeHref({
+                      siteId,
+                      areaId: selectedAreaId,
+                      status: option.value,
+                    })}
+                    className={`rounded-full border px-4 py-2 text-sm font-semibold transition ${selectedStatus === option.value
+                        ? "border-[#F97316] bg-[#FFF7ED] text-[#C2410C]"
+                        : "border-[var(--ui-border)] bg-[#FBFCFD] text-[var(--ui-text)] hover:border-[#FDBA74]"
+                      }`}
+                  >
+                    {option.label} · {option.count}
+                  </Link>
+                ))}
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        <div className="mt-4">
+          <div className="text-xs font-semibold uppercase text-[var(--ui-muted)]">Area</div>
+          <div className="mt-2 flex gap-2 overflow-x-auto pb-1">
             <Link
-              href={recipeHref({ siteId, areaId: UNASSIGNED_AREA_ID })}
-              className={`shrink-0 rounded-2xl border px-4 py-3 transition ${selectedAreaId === UNASSIGNED_AREA_ID
+              href={recipeHref({ siteId, status: selectedStatus })}
+              className={`shrink-0 rounded-2xl border px-4 py-3 transition ${!selectedAreaId
                   ? "border-[#F97316] bg-[#FFF7ED] shadow-[var(--ui-shadow-soft)]"
                   : "border-[var(--ui-border)] bg-[#FBFCFD] hover:border-[#FDBA74] hover:bg-white"
                 }`}
             >
-              <div className="text-sm font-semibold text-[var(--ui-text)]">Sin area</div>
-              <div className="mt-1 text-2xl font-semibold text-[#C2410C]">{recipesWithoutAreaCount}</div>
+              <div className="text-sm font-semibold text-[var(--ui-text)]">Todas las areas</div>
+              <div className="mt-1 text-2xl font-semibold text-[#C2410C]">{allRecipes.length}</div>
             </Link>
-          ) : null}
 
-          {areas.map((area) => {
-            const count = recipeCountByArea.get(area.id) ?? 0;
-            return (
+            {recipesWithoutAreaCount > 0 ? (
               <Link
-                key={area.id}
-                href={recipeHref({ siteId, areaId: area.id })}
-                className={`shrink-0 rounded-2xl border px-4 py-3 transition ${area.id === selectedAreaId
+                href={recipeHref({ siteId, areaId: UNASSIGNED_AREA_ID, status: selectedStatus })}
+                className={`shrink-0 rounded-2xl border px-4 py-3 transition ${selectedAreaId === UNASSIGNED_AREA_ID
                     ? "border-[#F97316] bg-[#FFF7ED] shadow-[var(--ui-shadow-soft)]"
                     : "border-[var(--ui-border)] bg-[#FBFCFD] hover:border-[#FDBA74] hover:bg-white"
                   }`}
               >
-                <div className="max-w-[180px] truncate text-sm font-semibold text-[var(--ui-text)]">
-                  {areaLabel(area)}
-                </div>
-                <div className="mt-1 text-2xl font-semibold text-[#C2410C]">{count}</div>
+                <div className="text-sm font-semibold text-[var(--ui-text)]">Sin area</div>
+                <div className="mt-1 text-2xl font-semibold text-[#C2410C]">{recipesWithoutAreaCount}</div>
               </Link>
-            );
-          })}
+            ) : null}
+
+            {areas.map((area) => {
+              const count = recipeCountByArea.get(area.id) ?? 0;
+              return (
+                <Link
+                  key={area.id}
+                  href={recipeHref({ siteId, areaId: area.id, status: selectedStatus })}
+                  className={`shrink-0 rounded-2xl border px-4 py-3 transition ${area.id === selectedAreaId
+                      ? "border-[#F97316] bg-[#FFF7ED] shadow-[var(--ui-shadow-soft)]"
+                      : "border-[var(--ui-border)] bg-[#FBFCFD] hover:border-[#FDBA74] hover:bg-white"
+                    }`}
+                >
+                  <div className="max-w-[180px] truncate text-sm font-semibold text-[var(--ui-text)]">
+                    {areaLabel(area)}
+                  </div>
+                  <div className="mt-1 text-2xl font-semibold text-[#C2410C]">{count}</div>
+                </Link>
+              );
+            })}
+          </div>
         </div>
       </section>
 
@@ -630,6 +805,10 @@ export default async function RecipeBookPage({
               {recipes.map((recipe) => {
                 const product = one(recipe.products);
                 const area = one(recipe.areas);
+                const recipeSite =
+                  isOwnerScope && recipe.site_id
+                    ? siteOptions.find((site) => site.id === recipe.site_id) ?? null
+                    : null;
                 const thumb = imageUrl(recipe);
                 const active = recipe.id === selectedRecipe?.id;
                 const isDraft = isDraftStatus(recipe.status);
@@ -641,6 +820,7 @@ export default async function RecipeBookPage({
                       areaId: selectedAreaId,
                       recipeId: recipe.id,
                       qty: productionQty,
+                      status: selectedStatus,
                     })}
                     className={`grid grid-cols-[86px_1fr] gap-3 rounded-3xl border p-3 transition ${active
                         ? "border-[#F97316] bg-[#FFF7ED] shadow-[var(--ui-shadow-soft)]"
@@ -661,7 +841,9 @@ export default async function RecipeBookPage({
                       <div className="line-clamp-2 text-base font-semibold leading-5 text-[var(--ui-text)]">
                         {product?.name ?? "Producto"}
                       </div>
-                      <div className="mt-2 text-xs text-[var(--ui-muted)]">{areaLabel(area)}</div>
+                      <div className="mt-2 text-xs text-[var(--ui-muted)]">
+                        {isOwnerScope ? `${siteLabel(recipeSite)} · ${areaLabel(area)}` : areaLabel(area)}
+                      </div>
                       <div className="mt-3 flex flex-wrap gap-2">
                         <span className="inline-flex rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-[#C2410C]">
                           {fmt(recipe.yield_qty)} {recipe.yield_unit}

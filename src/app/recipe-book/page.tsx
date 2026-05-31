@@ -171,6 +171,88 @@ function normalizeUnit(value: string | null | undefined) {
   return String(value ?? "").trim().toLowerCase();
 }
 
+type UnitFamily = "mass" | "volume" | "count";
+
+type UnitConversion = {
+  family: UnitFamily;
+  factorToBase: number;
+};
+
+const UNIT_CONVERSIONS: Record<string, UnitConversion> = {
+  g: { family: "mass", factorToBase: 1 },
+  gr: { family: "mass", factorToBase: 1 },
+  gramo: { family: "mass", factorToBase: 1 },
+  gramos: { family: "mass", factorToBase: 1 },
+  kg: { family: "mass", factorToBase: 1000 },
+  kilo: { family: "mass", factorToBase: 1000 },
+  kilos: { family: "mass", factorToBase: 1000 },
+  kilogramo: { family: "mass", factorToBase: 1000 },
+  kilogramos: { family: "mass", factorToBase: 1000 },
+  mg: { family: "mass", factorToBase: 0.001 },
+  miligramo: { family: "mass", factorToBase: 0.001 },
+  miligramos: { family: "mass", factorToBase: 0.001 },
+
+  ml: { family: "volume", factorToBase: 1 },
+  mililitro: { family: "volume", factorToBase: 1 },
+  mililitros: { family: "volume", factorToBase: 1 },
+  l: { family: "volume", factorToBase: 1000 },
+  lt: { family: "volume", factorToBase: 1000 },
+  lts: { family: "volume", factorToBase: 1000 },
+  litro: { family: "volume", factorToBase: 1000 },
+  litros: { family: "volume", factorToBase: 1000 },
+
+  un: { family: "count", factorToBase: 1 },
+  und: { family: "count", factorToBase: 1 },
+  unidad: { family: "count", factorToBase: 1 },
+  unidades: { family: "count", factorToBase: 1 },
+  porcion: { family: "count", factorToBase: 1 },
+  porciones: { family: "count", factorToBase: 1 },
+};
+
+function unitKey(value: string | null | undefined) {
+  const raw = String(value ?? "").trim().toLowerCase();
+  const firstSegment = raw.split(/\s+-\s+/)[0]?.trim() || raw;
+  const normalized = normalizeSlug(firstSegment).replace(/_/g, "");
+  return normalized;
+}
+
+function unitConversion(value: string | null | undefined): UnitConversion | null {
+  return UNIT_CONVERSIONS[unitKey(value)] ?? null;
+}
+
+function calculatePortions(params: {
+  totalQty: number;
+  totalUnit: string | null | undefined;
+  portionQty: number;
+  portionUnit: string | null | undefined;
+}) {
+  if (
+    !Number.isFinite(params.totalQty) ||
+    !Number.isFinite(params.portionQty) ||
+    params.portionQty <= 0
+  ) {
+    return { count: null as number | null, compatible: false };
+  }
+
+  const totalInfo = unitConversion(params.totalUnit);
+  const portionInfo = unitConversion(params.portionUnit);
+
+  if (totalInfo && portionInfo && totalInfo.family === portionInfo.family) {
+    return {
+      count: (params.totalQty * totalInfo.factorToBase) / (params.portionQty * portionInfo.factorToBase),
+      compatible: true,
+    };
+  }
+
+  const totalUnit = normalizeUnit(params.totalUnit);
+  const portionUnit = normalizeUnit(params.portionUnit);
+  if (!totalUnit || !portionUnit || totalUnit === portionUnit) {
+    return { count: params.totalQty / params.portionQty, compatible: true };
+  }
+
+  return { count: null as number | null, compatible: false };
+}
+
 function isStandalonePanaderiaArea(area: AreaShape) {
   const code = String(area.code ?? "").trim().toUpperCase();
   const slug = normalizeSlug(area.name);
@@ -534,25 +616,35 @@ export default async function RecipeBookPage({
         : "publicadas y borradores";
   const portionSize = Number(selectedRecipe?.portion_size ?? 0);
   const portionUnit = selectedRecipe?.portion_unit || selectedRecipe?.yield_unit || selectedProduct?.unit || "un";
-  const portionUnitMatchesYield =
-    normalizeUnit(portionUnit) && normalizeUnit(portionUnit) === normalizeUnit(selectedRecipe?.yield_unit);
-  const estimatedPortions =
-    selectedRecipe && portionSize > 0 && Number.isFinite(productionQty / portionSize)
-      ? productionQty / portionSize
-      : null;
+  const productionPortionCalc = selectedRecipe
+    ? calculatePortions({
+        totalQty: productionQty,
+        totalUnit: selectedRecipe.yield_unit,
+        portionQty: portionSize,
+        portionUnit,
+      })
+    : { count: null as number | null, compatible: false };
+  const basePortionCalc = selectedRecipe
+    ? calculatePortions({
+        totalQty: Number(selectedRecipe.yield_qty ?? 0),
+        totalUnit: selectedRecipe.yield_unit,
+        portionQty: portionSize,
+        portionUnit,
+      })
+    : { count: null as number | null, compatible: false };
+  const estimatedPortions = productionPortionCalc.count;
   const portionText =
     estimatedPortions != null
       ? `${fmt(estimatedPortions, 1)} porciones de ${fmt(portionSize)} ${portionUnit}`
       : "Porciones sin configurar";
   const basePortionText =
-    selectedRecipe && portionSize > 0
-      ? `${fmt(selectedRecipe.yield_qty / portionSize, 1)} porciones base`
-      : "Porcion pendiente";
+    basePortionCalc.count != null ? `${fmt(basePortionCalc.count, 1)} porciones base` : "Porcion pendiente";
   const showPortionWarning = Boolean(
-    estimatedPortions != null &&
-      selectedRecipe?.yield_unit &&
+    selectedRecipe &&
+      portionSize > 0 &&
+      selectedRecipe.yield_unit &&
       portionUnit &&
-      !portionUnitMatchesYield
+      !productionPortionCalc.compatible
   );
 
   const recipeGroups = Array.from(
@@ -585,7 +677,7 @@ export default async function RecipeBookPage({
     const active = recipe.id === selectedRecipe?.id;
     const isDraft = isDraftStatus(recipe.status);
     const recipeSite = recipe.site_id ? siteMap.get(recipe.site_id) ?? null : null;
-    const qtyForLink = selectedRecipe ? productionQty : null;
+    const qtyForLink = active ? productionQty : null;
     return (
       <Link
         key={recipe.id}

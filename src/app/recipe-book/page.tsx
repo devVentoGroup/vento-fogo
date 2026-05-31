@@ -6,6 +6,7 @@ import { checkPermission } from "@/lib/auth/permissions";
 export const dynamic = "force-dynamic";
 
 const APP_ID = "fogo";
+const UNASSIGNED_AREA_ID = "__sin_area__";
 
 type Relation<T> = T | T[] | null | undefined;
 
@@ -17,6 +18,11 @@ type ProductShape = {
   stock_unit_code?: string | null;
   image_url?: string | null;
   catalog_image_url?: string | null;
+};
+
+type IngredientProductShape = ProductShape & {
+  id: string;
+  cost: number | null;
 };
 
 type AreaShape = {
@@ -46,10 +52,13 @@ type RecipeCardRow = {
   areas?: Relation<AreaShape>;
 };
 
-type IngredientRow = {
+type IngredientLineRow = {
   ingredient_product_id: string;
   quantity: number | null;
-  products?: Relation<ProductShape & { cost: number | null }>;
+};
+
+type IngredientViewRow = IngredientLineRow & {
+  product: IngredientProductShape | null;
 };
 
 type StepRow = {
@@ -128,6 +137,10 @@ function normalizeSlug(value: string | null | undefined) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "");
+}
+
+function normalizeUnit(value: string | null | undefined) {
+  return String(value ?? "").trim().toLowerCase();
 }
 
 function isStandalonePanaderiaArea(area: AreaShape) {
@@ -237,8 +250,12 @@ export default async function RecipeBookPage({
         .eq("is_active", true)
         .in("status", isManagement ? ["published", "draft"] : ["published"])
         .order("updated_at", { ascending: false })
-        .limit(240);
-      if (siteId) query = query.eq("site_id", siteId);
+        .limit(800);
+
+      if (siteId) {
+        query = isManagement ? query.or(`site_id.eq.${siteId},site_id.is.null`) : query.eq("site_id", siteId);
+      }
+
       return query;
     })(),
   ]);
@@ -260,15 +277,20 @@ export default async function RecipeBookPage({
     .sort(sortProductionAreas);
 
   const recipeCountByArea = new Map<string, number>();
+  let recipesWithoutAreaCount = 0;
   for (const recipe of allRecipes) {
     const areaId = String(recipe.area_id ?? "");
-    if (!areaId) continue;
+    if (!areaId) {
+      recipesWithoutAreaCount += 1;
+      continue;
+    }
     recipeCountByArea.set(areaId, (recipeCountByArea.get(areaId) ?? 0) + 1);
   }
 
   const currentAreaId = String(currentArea ?? "");
   const currentAreaHasRecipes = currentAreaId && (recipeCountByArea.get(currentAreaId) ?? 0) > 0;
-  const requestedAreaIsValid = requestedAreaId && areas.some((area) => area.id === requestedAreaId);
+  const requestedAreaIsValid =
+    requestedAreaId === UNASSIGNED_AREA_ID || areas.some((area) => area.id === requestedAreaId);
   const selectedAreaId = requestedAreaIsValid
     ? requestedAreaId
     : isManagement
@@ -277,9 +299,10 @@ export default async function RecipeBookPage({
         ? currentAreaId
         : "";
 
-  const recipes = allRecipes.filter((recipe) =>
-    selectedAreaId ? recipe.area_id === selectedAreaId : true
-  );
+  const recipes = allRecipes.filter((recipe) => {
+    if (selectedAreaId === UNASSIGNED_AREA_ID) return !recipe.area_id;
+    return selectedAreaId ? recipe.area_id === selectedAreaId : true;
+  });
   const selectedRecipe =
     recipes.find((recipe) => recipe.id === requestedRecipeId) ?? recipes[0] ?? null;
   const selectedProduct = one(selectedRecipe?.products);
@@ -294,168 +317,186 @@ export default async function RecipeBookPage({
       ? productionQty / Number(selectedRecipe.yield_qty)
       : 1;
 
+  const selectedRecipeIsDraft = isDraftStatus(selectedRecipe?.status);
+  const selectedRecipeIsPublished = isPublishedStatus(selectedRecipe?.status);
   const canCreateBatch = await checkPermission(supabase, APP_ID, "production.batches.create", {
     siteId,
-    areaId: selectedAreaId || selectedRecipe?.area_id || null,
+    areaId: selectedRecipe?.area_id || selectedAreaId || null,
   });
 
-  const [{ data: ingredientRows }, { data: stepRows }] = selectedRecipe
+  const [{ data: ingredientLineRows }, { data: stepRows }] = selectedRecipe
     ? await Promise.all([
-        supabase
-          .from("recipes")
-          .select(
-            "ingredient_product_id,quantity,products(id,name,sku,unit,stock_unit_code,cost,image_url,catalog_image_url)"
-          )
-          .eq("product_id", selectedRecipe.product_id)
-          .eq("is_active", true)
-          .order("created_at", { ascending: true }),
-        supabase
-          .from("recipe_steps")
-          .select("id,step_number,description,tip,time_minutes,image_path")
-          .eq("recipe_card_id", selectedRecipe.id)
-          .order("step_number", { ascending: true }),
-      ])
-    : [{ data: [] as IngredientRow[] }, { data: [] as StepRow[] }];
+      supabase
+        .from("recipes")
+        .select("ingredient_product_id,quantity")
+        .eq("product_id", selectedRecipe.product_id)
+        .eq("is_active", true)
+        .order("created_at", { ascending: true }),
+      supabase
+        .from("recipe_steps")
+        .select("id,step_number,description,tip,time_minutes,image_path")
+        .eq("recipe_card_id", selectedRecipe.id)
+        .order("step_number", { ascending: true }),
+    ])
+    : [{ data: [] as IngredientLineRow[] }, { data: [] as StepRow[] }];
 
-  const ingredients = (ingredientRows ?? []) as IngredientRow[];
+  const ingredientLines = (ingredientLineRows ?? []) as IngredientLineRow[];
+  const ingredientProductIds = Array.from(
+    new Set(
+      ingredientLines
+        .map((row) => String(row.ingredient_product_id ?? "").trim())
+        .filter(Boolean)
+    )
+  );
+
+  const { data: ingredientProductsData } = ingredientProductIds.length
+    ? await supabase
+      .from("products")
+      .select("id,name,sku,unit,stock_unit_code,cost,image_url,catalog_image_url")
+      .in("id", ingredientProductIds)
+    : { data: [] as IngredientProductShape[] };
+
+  const ingredientProductMap = new Map<string, IngredientProductShape>();
+  for (const product of (ingredientProductsData ?? []) as IngredientProductShape[]) {
+    ingredientProductMap.set(product.id, product);
+  }
+
+  const ingredients: IngredientViewRow[] = ingredientLines.map((row) => ({
+    ...row,
+    product: ingredientProductMap.get(String(row.ingredient_product_id ?? "")) ?? null,
+  }));
   const steps = (stepRows ?? []) as StepRow[];
   const totalCost = ingredients.reduce((acc, row) => {
-    const product = one(row.products);
     const qty = Number(row.quantity ?? 0) * scaleFactor;
-    const cost = Number(product?.cost ?? 0);
+    const cost = Number(row.product?.cost ?? 0);
     return acc + (Number.isFinite(qty * cost) ? qty * cost : 0);
   }, 0);
 
   const firstStepImage = steps.find((step) => step.image_path)?.image_path ?? "";
   const coverImage = imageUrl(selectedRecipe) || firstStepImage;
   const hasRecipes = allRecipes.length > 0;
-  const selectedAreaName = selectedArea ? areaLabel(selectedArea) : selectedAreaId ? "Area" : "Todas las areas";
+  const selectedAreaName =
+    selectedAreaId === UNASSIGNED_AREA_ID
+      ? "Sin area"
+      : selectedArea
+        ? areaLabel(selectedArea)
+        : selectedAreaId
+          ? "Area"
+          : "Todas las areas";
   const baseYield = `${fmt(selectedRecipe?.yield_qty)} ${selectedRecipe?.yield_unit ?? "-"}`;
   const targetYield = `${fmt(productionQty)} ${selectedRecipe?.yield_unit ?? selectedProduct?.unit ?? "-"}`;
   const totalMinutes = steps.reduce((acc, step) => acc + Number(step.time_minutes ?? 0), 0);
-  const selectedRecipeIsDraft = isDraftStatus(selectedRecipe?.status);
-  const selectedRecipeIsPublished = isPublishedStatus(selectedRecipe?.status);
   const visibleRecipeTypeText = isManagement ? "publicadas y borradores" : "publicadas";
+  const portionSize = Number(selectedRecipe?.portion_size ?? 0);
+  const portionUnit =
+    selectedRecipe?.portion_unit || selectedRecipe?.yield_unit || selectedProduct?.unit || "un";
+  const portionUnitMatchesYield =
+    normalizeUnit(portionUnit) && normalizeUnit(portionUnit) === normalizeUnit(selectedRecipe?.yield_unit);
+  const estimatedPortions =
+    selectedRecipe && portionSize > 0 && Number.isFinite(productionQty / portionSize)
+      ? productionQty / portionSize
+      : null;
+  const portionText =
+    estimatedPortions != null
+      ? `${fmt(estimatedPortions, 1)} porciones de ${fmt(portionSize)} ${portionUnit}`
+      : "Porciones sin configurar";
+  const basePortionText =
+    selectedRecipe && portionSize > 0
+      ? `${fmt(selectedRecipe.yield_qty / portionSize, 1)} porciones base`
+      : "Porcion pendiente";
+  const showPortionWarning = Boolean(
+    estimatedPortions != null &&
+    selectedRecipe?.yield_unit &&
+    portionUnit &&
+    !portionUnitMatchesYield
+  );
 
   if (!hasRecipes) {
     return (
       <div className="space-y-6">
-        <section className="overflow-hidden rounded-[var(--ui-radius-card)] border border-[#FED7AA] bg-[#FFF7ED] shadow-[var(--ui-shadow-2)]">
-          <div className="grid gap-6 p-6 md:p-8 lg:grid-cols-[1fr_340px]">
-            <div>
-              <span className="inline-flex rounded-full bg-white px-3 py-1 text-xs font-semibold uppercase text-[#C2410C]">
-                Recetario FOGO
-              </span>
-              <h1 className="mt-4 max-w-3xl text-4xl font-semibold leading-tight text-[var(--ui-text)] md:text-6xl">
-                No hay recetas visibles
-              </h1>
-              <p className="mt-4 max-w-2xl text-base leading-7 text-[var(--ui-muted)] md:text-lg">
-                Cuando una receta este disponible para tu rol, aparecera aqui como ficha visual para que el equipo pueda revisarla o producirla paso a paso.
-              </p>
-            </div>
-            <div className="rounded-2xl border border-[#FDBA74] bg-white p-5 shadow-[var(--ui-shadow-soft)]">
-              <div className="text-sm font-semibold text-[var(--ui-text)]">Siguiente accion</div>
-              <p className="mt-2 text-sm leading-6 text-[var(--ui-muted)]">
-                Crea o publica una receta desde el administrador de recetas.
-              </p>
-              {isManagement ? (
-                <Link href="/recipes" className="ui-btn ui-btn--brand ui-btn--sm mt-4 w-full">
-                  Ir a recetas
-                </Link>
-              ) : null}
-            </div>
-          </div>
+        <section className="rounded-[var(--ui-radius-card)] border border-[#FED7AA] bg-[#FFF7ED] p-6 shadow-[var(--ui-shadow-soft)] md:p-8">
+          <span className="inline-flex rounded-full bg-white px-3 py-1 text-xs font-semibold uppercase text-[#C2410C]">
+            Recetario FOGO
+          </span>
+          <h1 className="mt-4 max-w-3xl text-3xl font-semibold leading-tight text-[var(--ui-text)] md:text-5xl">
+            No hay recetas visibles
+          </h1>
+          <p className="mt-3 max-w-2xl text-base leading-7 text-[var(--ui-muted)]">
+            Cuando una receta este disponible para tu rol, aparecera aqui como ficha visual para producirla paso a paso.
+          </p>
+          {isManagement ? (
+            <Link href="/recipes" className="ui-btn ui-btn--brand ui-btn--sm mt-5">
+              Ir a recetas
+            </Link>
+          ) : null}
         </section>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <section className="overflow-hidden rounded-[var(--ui-radius-card)] border border-[#E5D6C5] bg-[#FFFDFC] shadow-[var(--ui-shadow-2)]">
-        <div className="grid min-h-[460px] lg:grid-cols-[minmax(0,1fr)_380px]">
-          <div className="relative flex min-h-[460px] flex-col justify-end overflow-hidden bg-[#1F2937] p-6 text-white md:p-8">
-            {coverImage ? (
-              <div
-                className="absolute inset-0 bg-cover bg-center"
-                style={{ backgroundImage: `url(\"${coverImage}\")` }}
-              />
-            ) : (
-              <div className="absolute inset-0 bg-[linear-gradient(135deg,#111827_0%,#7C2D12_48%,#F97316_100%)]" />
-            )}
-            <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(17,24,39,0.12)_0%,rgba(17,24,39,0.86)_100%)]" />
-            <div className="relative max-w-4xl">
-              <div className="mb-5 flex flex-wrap gap-2">
-                <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold uppercase text-[#C2410C]">
+    <div className="space-y-5">
+      <section className="rounded-[var(--ui-radius-card)] border border-[#FED7AA] bg-[linear-gradient(135deg,#FFF7ED_0%,#FFFFFF_58%,#FFFBF5_100%)] p-4 shadow-[var(--ui-shadow-soft)] md:p-5">
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_390px]">
+          <div className="flex gap-4">
+            <div
+              className="hidden h-28 w-28 shrink-0 overflow-hidden rounded-3xl border border-[#FED7AA] bg-[#FFF7ED] bg-cover bg-center shadow-[var(--ui-shadow-soft)] sm:block"
+              style={coverImage ? { backgroundImage: `url("${coverImage}")` } : undefined}
+            >
+              {!coverImage ? (
+                <div className="flex h-full items-center justify-center text-4xl font-semibold text-[#F97316]">
+                  {String(selectedProduct?.name ?? "R").trim().charAt(0).toUpperCase() || "R"}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap gap-2">
+                <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold uppercase text-[#C2410C] shadow-sm">
                   Recetario FOGO
                 </span>
-                <span className="rounded-full border border-white/30 bg-white/15 px-3 py-1 text-xs font-semibold text-white">
+                <span className="rounded-full border border-[#FED7AA] bg-white/80 px-3 py-1 text-xs font-semibold text-[#9A3412]">
                   {selectedAreaName}
                 </span>
-                <span className="rounded-full border border-white/30 bg-white/15 px-3 py-1 text-xs font-semibold text-white">
+                <span className="rounded-full border border-[#FED7AA] bg-white/80 px-3 py-1 text-xs font-semibold text-[#9A3412]">
                   {recipes.length} recetas {visibleRecipeTypeText}
                 </span>
                 {isManagement && selectedRecipeIsDraft ? (
-                  <span className="rounded-full border border-[#FDBA74] bg-[#FFF7ED] px-3 py-1 text-xs font-semibold uppercase text-[#C2410C]">
+                  <span className="rounded-full border border-[#FDBA74] bg-[#FFEDD5] px-3 py-1 text-xs font-semibold uppercase text-[#C2410C]">
                     Borrador
                   </span>
                 ) : null}
               </div>
-              <h1 className="max-w-4xl text-4xl font-semibold leading-[1.02] text-white md:text-6xl">
+
+              <h1 className="mt-4 max-w-4xl text-3xl font-semibold leading-tight text-[var(--ui-text)] md:text-5xl">
                 {selectedProduct?.name ?? "Selecciona una receta"}
               </h1>
-              <p className="mt-5 max-w-2xl text-base leading-7 text-white/88 md:text-lg">
+              <p className="mt-3 max-w-3xl text-base leading-7 text-[var(--ui-muted)]">
                 {selectedRecipe?.recipe_description ||
-                  "Ficha visual de produccion con cantidades listas, ingredientes claros y paso a paso para ejecutar en cocina."}
+                  "Guia visual de produccion: cantidades claras, ingredientes escalados y pasos faciles de seguir."}
               </p>
+
               {isManagement && selectedRecipeIsDraft ? (
-                <p className="mt-4 max-w-2xl rounded-2xl border border-[#FDBA74] bg-[#FFF7ED] px-4 py-3 text-sm font-semibold leading-6 text-[#C2410C]">
+                <div className="mt-4 max-w-3xl rounded-2xl border border-[#FED7AA] bg-white/80 px-4 py-3 text-sm font-semibold leading-6 text-[#C2410C]">
                   Esta receta esta en borrador. Puedes revisarla, pero no se puede producir hasta publicarla.
-                </p>
+                </div>
               ) : null}
             </div>
           </div>
 
-          <aside className="flex flex-col justify-between border-t border-[#E5D6C5] bg-white p-6 lg:border-l lg:border-t-0 md:p-7">
-            <div>
-              <div className="text-xs font-semibold uppercase text-[#C2410C]">Produccion de hoy</div>
-              <div className="mt-5 grid gap-3">
-                <div className="rounded-2xl border border-[#FED7AA] bg-[#FFF7ED] p-4">
-                  <div className="text-xs font-semibold uppercase text-[#C2410C]">Cantidad objetivo</div>
-                  <div className="mt-2 text-4xl font-semibold text-[var(--ui-text)]">{targetYield}</div>
-                  <div className="mt-2 text-sm text-[var(--ui-muted)]">Base original: {baseYield}</div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="rounded-2xl border border-[var(--ui-border)] bg-[#FBFCFD] p-4">
-                    <div className="text-xs font-semibold uppercase text-[var(--ui-muted)]">Tiempo</div>
-                    <div className="mt-2 text-2xl font-semibold text-[var(--ui-text)]">
-                      {selectedRecipe?.prep_time_minutes
-                        ? `${fmt(selectedRecipe.prep_time_minutes, 0)} min`
-                        : totalMinutes > 0
-                          ? `${fmt(totalMinutes, 0)} min`
-                          : "-"}
-                    </div>
-                  </div>
-                  <div className="rounded-2xl border border-[var(--ui-border)] bg-[#FBFCFD] p-4">
-                    <div className="text-xs font-semibold uppercase text-[var(--ui-muted)]">Nivel</div>
-                    <div className="mt-2 text-2xl font-semibold text-[var(--ui-text)]">
-                      {difficultyLabel(selectedRecipe?.difficulty)}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <form className="mt-6 space-y-3 rounded-2xl border border-[#E5D6C5] bg-[#FFFDFC] p-4">
+          <aside className="rounded-3xl border border-[#FED7AA] bg-white p-4 shadow-[var(--ui-shadow-soft)]">
+            <div className="text-xs font-semibold uppercase text-[#C2410C]">Produccion</div>
+            <form className="mt-3 space-y-3">
               {siteId ? <input type="hidden" name="site_id" value={siteId} /> : null}
               {selectedAreaId ? <input type="hidden" name="area_id" value={selectedAreaId} /> : null}
               {selectedRecipe ? <input type="hidden" name="recipe_id" value={selectedRecipe.id} /> : null}
+
               <label>
                 <span className="ui-label">
-                  Cambiar cantidad ({selectedRecipe?.yield_unit ?? selectedProduct?.unit ?? "un"})
+                  Cantidad a preparar ({selectedRecipe?.yield_unit ?? selectedProduct?.unit ?? "un"})
                 </span>
                 <input
-                  className="ui-input mt-1 bg-white text-xl font-semibold"
+                  className="ui-input mt-1 bg-white text-2xl font-semibold"
                   type="number"
                   min="0.01"
                   step="0.01"
@@ -463,6 +504,7 @@ export default async function RecipeBookPage({
                   defaultValue={productionQty}
                 />
               </label>
+
               <div className="grid grid-cols-2 gap-2">
                 <button type="submit" className="ui-btn ui-btn--brand ui-btn--sm">
                   Recalcular
@@ -481,6 +523,37 @@ export default async function RecipeBookPage({
                 )}
               </div>
             </form>
+
+            <div className="mt-4 grid gap-2">
+              <div className="rounded-2xl border border-[#FED7AA] bg-[#FFF7ED] p-3">
+                <div className="text-xs font-semibold uppercase text-[#C2410C]">Resultado</div>
+                <div className="mt-1 text-3xl font-semibold text-[var(--ui-text)]">{targetYield}</div>
+                <div className="mt-1 text-sm text-[var(--ui-muted)]">Base: {baseYield}</div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="rounded-2xl border border-[var(--ui-border)] bg-[#FBFCFD] p-3">
+                  <div className="text-xs font-semibold uppercase text-[var(--ui-muted)]">Porciones</div>
+                  <div className="mt-1 text-base font-semibold leading-5 text-[var(--ui-text)]">{portionText}</div>
+                  <div className="mt-1 text-xs text-[var(--ui-muted)]">{basePortionText}</div>
+                </div>
+                <div className="rounded-2xl border border-[var(--ui-border)] bg-[#FBFCFD] p-3">
+                  <div className="text-xs font-semibold uppercase text-[var(--ui-muted)]">Tiempo</div>
+                  <div className="mt-1 text-2xl font-semibold text-[var(--ui-text)]">
+                    {selectedRecipe?.prep_time_minutes
+                      ? `${fmt(selectedRecipe.prep_time_minutes, 0)} min`
+                      : totalMinutes > 0
+                        ? `${fmt(totalMinutes, 0)} min`
+                        : "-"}
+                  </div>
+                  <div className="mt-1 text-xs text-[var(--ui-muted)]">{difficultyLabel(selectedRecipe?.difficulty)}</div>
+                </div>
+              </div>
+              {showPortionWarning ? (
+                <div className="rounded-2xl border border-[#FED7AA] bg-[#FFF7ED] p-3 text-xs font-semibold leading-5 text-[#C2410C]">
+                  Revisa unidades: el rendimiento esta en {selectedRecipe?.yield_unit} y la porcion en {portionUnit}.
+                </div>
+              ) : null}
+            </div>
           </aside>
         </div>
       </section>
@@ -489,7 +562,7 @@ export default async function RecipeBookPage({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="ui-h2">Elegir area</h2>
-            <p className="mt-1 text-sm text-[var(--ui-muted)]">Vista rapida para encontrar la receta correcta.</p>
+            <p className="mt-1 text-sm text-[var(--ui-muted)]">Encuentra rapido la receta que necesitas preparar.</p>
           </div>
           {isManagement ? (
             <Link href="/recipes" className="ui-btn ui-btn--ghost ui-btn--sm">
@@ -500,26 +573,38 @@ export default async function RecipeBookPage({
         <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
           <Link
             href={recipeHref({ siteId })}
-            className={`shrink-0 rounded-2xl border px-4 py-3 transition ${
-              !selectedAreaId
+            className={`shrink-0 rounded-2xl border px-4 py-3 transition ${!selectedAreaId
                 ? "border-[#F97316] bg-[#FFF7ED] shadow-[var(--ui-shadow-soft)]"
                 : "border-[var(--ui-border)] bg-[#FBFCFD] hover:border-[#FDBA74] hover:bg-white"
-            }`}
+              }`}
           >
             <div className="text-sm font-semibold text-[var(--ui-text)]">Todas</div>
             <div className="mt-1 text-2xl font-semibold text-[#C2410C]">{allRecipes.length}</div>
           </Link>
+
+          {recipesWithoutAreaCount > 0 ? (
+            <Link
+              href={recipeHref({ siteId, areaId: UNASSIGNED_AREA_ID })}
+              className={`shrink-0 rounded-2xl border px-4 py-3 transition ${selectedAreaId === UNASSIGNED_AREA_ID
+                  ? "border-[#F97316] bg-[#FFF7ED] shadow-[var(--ui-shadow-soft)]"
+                  : "border-[var(--ui-border)] bg-[#FBFCFD] hover:border-[#FDBA74] hover:bg-white"
+                }`}
+            >
+              <div className="text-sm font-semibold text-[var(--ui-text)]">Sin area</div>
+              <div className="mt-1 text-2xl font-semibold text-[#C2410C]">{recipesWithoutAreaCount}</div>
+            </Link>
+          ) : null}
+
           {areas.map((area) => {
             const count = recipeCountByArea.get(area.id) ?? 0;
             return (
               <Link
                 key={area.id}
                 href={recipeHref({ siteId, areaId: area.id })}
-                className={`shrink-0 rounded-2xl border px-4 py-3 transition ${
-                  area.id === selectedAreaId
+                className={`shrink-0 rounded-2xl border px-4 py-3 transition ${area.id === selectedAreaId
                     ? "border-[#F97316] bg-[#FFF7ED] shadow-[var(--ui-shadow-soft)]"
                     : "border-[var(--ui-border)] bg-[#FBFCFD] hover:border-[#FDBA74] hover:bg-white"
-                }`}
+                  }`}
               >
                 <div className="max-w-[180px] truncate text-sm font-semibold text-[var(--ui-text)]">
                   {areaLabel(area)}
@@ -531,13 +616,13 @@ export default async function RecipeBookPage({
         </div>
       </section>
 
-      <section className="grid gap-6 xl:grid-cols-[380px_1fr]">
+      <section className="grid gap-5 xl:grid-cols-[360px_1fr]">
         <aside className="space-y-4 xl:sticky xl:top-24 xl:h-fit">
           <div className="rounded-[var(--ui-radius-card)] border border-[var(--ui-border)] bg-white p-4 shadow-[var(--ui-shadow-soft)]">
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="ui-h2">Recetas</h2>
-                <p className="mt-1 text-sm text-[var(--ui-muted)]">Toca una tarjeta para verla.</p>
+                <p className="mt-1 text-sm text-[var(--ui-muted)]">Elige una ficha para verla.</p>
               </div>
               <span className="ui-chip ui-chip--brand">{recipes.length}</span>
             </div>
@@ -557,18 +642,17 @@ export default async function RecipeBookPage({
                       recipeId: recipe.id,
                       qty: productionQty,
                     })}
-                    className={`grid grid-cols-[92px_1fr] gap-3 rounded-2xl border p-3 transition ${
-                      active
+                    className={`grid grid-cols-[86px_1fr] gap-3 rounded-3xl border p-3 transition ${active
                         ? "border-[#F97316] bg-[#FFF7ED] shadow-[var(--ui-shadow-soft)]"
                         : "border-[var(--ui-border)] bg-[#FBFCFD] hover:border-[#FDBA74] hover:bg-white"
-                    }`}
+                      }`}
                   >
                     <div
-                      className="h-[92px] overflow-hidden rounded-xl bg-[#FFF7ED] bg-cover bg-center"
-                      style={thumb ? { backgroundImage: `url(\"${thumb}\")` } : undefined}
+                      className="h-[86px] overflow-hidden rounded-2xl bg-[#FFF7ED] bg-cover bg-center"
+                      style={thumb ? { backgroundImage: `url("${thumb}")` } : undefined}
                     >
                       {!thumb ? (
-                        <div className="flex h-full items-center justify-center text-xl font-semibold text-[#C2410C]">
+                        <div className="flex h-full items-center justify-center text-2xl font-semibold text-[#F97316]">
                           {String(product?.name ?? "R").trim().charAt(0).toUpperCase() || "R"}
                         </div>
                       ) : null}
@@ -582,8 +666,13 @@ export default async function RecipeBookPage({
                         <span className="inline-flex rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-[#C2410C]">
                           {fmt(recipe.yield_qty)} {recipe.yield_unit}
                         </span>
+                        {recipe.portion_size ? (
+                          <span className="inline-flex rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-[#9A3412]">
+                            {fmt(recipe.portion_size)} {recipe.portion_unit ?? recipe.yield_unit}/porc.
+                          </span>
+                        ) : null}
                         {isManagement && isDraft ? (
-                          <span className="inline-flex rounded-full border border-[#FDBA74] bg-[#FFF7ED] px-2.5 py-1 text-xs font-semibold uppercase text-[#C2410C]">
+                          <span className="inline-flex rounded-full border border-[#FDBA74] bg-[#FFEDD5] px-2.5 py-1 text-xs font-semibold uppercase text-[#C2410C]">
                             Borrador
                           </span>
                         ) : null}
@@ -599,32 +688,39 @@ export default async function RecipeBookPage({
           </div>
         </aside>
 
-        <main className="space-y-6">
+        <main className="space-y-5">
           <section className="rounded-[var(--ui-radius-card)] border border-[var(--ui-border)] bg-white p-5 shadow-[var(--ui-shadow-1)] md:p-6">
-            <div className="flex flex-wrap items-end justify-between gap-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <div className="text-xs font-semibold uppercase text-[#C2410C]">1. Alistar</div>
                 <h2 className="mt-1 text-3xl font-semibold text-[var(--ui-text)]">Ingredientes</h2>
+                <p className="mt-1 text-sm text-[var(--ui-muted)]">
+                  Cantidades calculadas para {targetYield}
+                  {estimatedPortions != null ? ` (${portionText})` : ""}.
+                </p>
               </div>
-              <div className="text-right">
-                <div className="text-xs font-semibold uppercase text-[var(--ui-muted)]">Costo estimado</div>
-                <div className="text-2xl font-semibold text-[#C2410C]">{money(totalCost)}</div>
-              </div>
+              {isManagement && ingredients.length > 0 ? (
+                <div className="rounded-2xl border border-[#FED7AA] bg-[#FFF7ED] px-4 py-3 text-right">
+                  <div className="text-xs font-semibold uppercase text-[#C2410C]">Costo estimado</div>
+                  <div className="text-xl font-semibold text-[var(--ui-text)]">{money(totalCost)}</div>
+                </div>
+              ) : null}
             </div>
+
             <div className="mt-5 grid gap-3 md:grid-cols-2">
               {ingredients.map((row, index) => {
-                const product = one(row.products);
+                const product = row.product;
                 const thumb = productImage(product);
                 const requiredQty = Number(row.quantity ?? 0) * scaleFactor;
                 const unit = product?.stock_unit_code || product?.unit || "-";
                 return (
                   <div
                     key={`${row.ingredient_product_id}-${index}`}
-                    className="grid grid-cols-[72px_1fr_auto] items-center gap-3 rounded-2xl border border-[var(--ui-border)] bg-[#FBFCFD] p-3"
+                    className="grid grid-cols-[68px_1fr_auto] items-center gap-3 rounded-3xl border border-[var(--ui-border)] bg-[#FBFCFD] p-3"
                   >
                     <div
-                      className="flex h-[72px] w-[72px] items-center justify-center rounded-xl bg-[#FFF7ED] bg-cover bg-center text-lg font-semibold text-[#C2410C]"
-                      style={thumb ? { backgroundImage: `url(\"${thumb}\")` } : undefined}
+                      className="flex h-[68px] w-[68px] items-center justify-center rounded-2xl bg-[#FFF7ED] bg-cover bg-center text-lg font-semibold text-[#F97316]"
+                      style={thumb ? { backgroundImage: `url("${thumb}")` } : undefined}
                     >
                       {!thumb ? index + 1 : null}
                     </div>
@@ -642,7 +738,9 @@ export default async function RecipeBookPage({
                 );
               })}
               {ingredients.length === 0 ? (
-                <div className="ui-empty md:col-span-2">Esta receta aun no tiene ingredientes publicados.</div>
+                <div className="ui-empty md:col-span-2">
+                  No hay ingredientes guardados para esta receta. Si acabas de editarlos, guarda la receta y vuelve a abrir el recetario.
+                </div>
               ) : null}
             </div>
           </section>
@@ -655,26 +753,26 @@ export default async function RecipeBookPage({
               </div>
               <span className="ui-chip">{steps.length} pasos</span>
             </div>
-            <div className="mt-6 space-y-5">
+            <div className="mt-6 space-y-4">
               {steps.map((step) => (
                 <article
                   key={step.id}
                   className="overflow-hidden rounded-3xl border border-[#E5D6C5] bg-[#FFFDFC] shadow-[var(--ui-shadow-soft)]"
                 >
-                  <div className="grid md:grid-cols-[360px_1fr]">
+                  <div className="grid md:grid-cols-[320px_1fr]">
                     <div
-                      className="min-h-[260px] bg-[#FFF7ED] bg-cover bg-center"
-                      style={step.image_path ? { backgroundImage: `url(\"${step.image_path}\")` } : undefined}
+                      className="min-h-[230px] bg-[#FFF7ED] bg-cover bg-center"
+                      style={step.image_path ? { backgroundImage: `url("${step.image_path}")` } : undefined}
                     >
                       {!step.image_path ? (
-                        <div className="flex h-full min-h-[260px] items-center justify-center text-base font-semibold text-[#C2410C]">
+                        <div className="flex h-full min-h-[230px] items-center justify-center text-base font-semibold text-[#C2410C]">
                           Foto pendiente
                         </div>
                       ) : null}
                     </div>
                     <div className="p-6 md:p-7">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="flex h-14 w-14 items-center justify-center rounded-full bg-[#F97316] text-2xl font-semibold text-white">
+                        <span className="flex h-12 w-12 items-center justify-center rounded-full bg-[#F97316] text-xl font-semibold text-white">
                           {step.step_number}
                         </span>
                         {step.time_minutes != null ? (
@@ -694,7 +792,8 @@ export default async function RecipeBookPage({
                 </article>
               ))}
               {steps.length === 0 ? (
-                <div className="ui-empty">Esta receta aun no tiene pasos publicados.</div>
+                <div className="ui-empty">Esta receta aun no tiene pasos guardados.
+                </div>
               ) : null}
             </div>
           </section>

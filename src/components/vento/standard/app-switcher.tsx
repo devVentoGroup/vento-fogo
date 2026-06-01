@@ -40,6 +40,30 @@ function DotsIcon() {
   );
 }
 
+function AppLogosPreloader({ logoSources }: { logoSources: string[] }) {
+  if (!logoSources.length) return null;
+
+  return (
+    <div
+      aria-hidden="true"
+      className="pointer-events-none fixed -left-[10000px] top-0 h-px w-px overflow-hidden opacity-0"
+    >
+      {logoSources.map((logoSrc) => (
+        <Image
+          key={logoSrc}
+          src={logoSrc}
+          alt=""
+          width={40}
+          height={40}
+          priority
+          unoptimized
+          className="h-px w-px"
+        />
+      ))}
+    </div>
+  );
+}
+
 function StatusPill({ access }: { access: AppAccess }) {
   const label =
     access === "enabled"
@@ -86,6 +110,7 @@ function AppTile({
       className={logoClassName}
       width={40}
       height={40}
+      unoptimized
       onError={() => setLogoError(true)}
     />
   );
@@ -132,6 +157,13 @@ export function AppSwitcher({ appSwitcherItems }: AppSwitcherProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   const apps = appSwitcherItems ?? [];
+  const logoSources = Array.from(
+    new Set(
+      apps
+        .map((app) => String(app.logoSrc ?? "").trim())
+        .filter((logoSrc) => logoSrc.length > 0)
+    )
+  );
 
   const workspace = apps.filter((app) => app.group === "Workspace");
   const operacion = apps.filter((app) => app.group === "Operacion");
@@ -157,6 +189,8 @@ export function AppSwitcher({ appSwitcherItems }: AppSwitcherProps) {
 
   return (
     <div ref={rootRef} className="relative">
+      <AppLogosPreloader logoSources={logoSources} />
+
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}

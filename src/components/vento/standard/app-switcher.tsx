@@ -88,8 +88,16 @@ function AppTile({
   onNavigate: () => void;
 }) {
   const isEnabled = app.access === "enabled";
+  const isHub = app.id === "hub";
   const [logoError, setLogoError] = useState(false);
   const fallback = app.name.slice(0, 1);
+
+  const iconWrapStyle = isHub
+    ? { width: 92, height: 50, maxWidth: "100%" }
+    : undefined;
+
+  const logoWidth = isHub ? 84 : 40;
+  const logoHeight = isHub ? 44 : 40;
 
   const logoClassName =
     app.access === "enabled"
@@ -102,15 +110,21 @@ function AppTile({
       : "ui-app-icon-fallback opacity-35 grayscale";
 
   const logoNode = logoError ? (
-    <div className={fallbackClassName}>{fallback}</div>
+    <div
+      className={fallbackClassName}
+      style={isHub ? { width: logoWidth, height: logoHeight } : undefined}
+    >
+      {fallback}
+    </div>
   ) : (
     <Image
       src={app.logoSrc}
       alt={`Logo ${app.name}`}
       className={logoClassName}
-      width={40}
-      height={40}
+      width={logoWidth}
+      height={logoHeight}
       unoptimized
+      style={isHub ? { width: logoWidth, height: logoHeight, objectFit: "contain" } : undefined}
       onError={() => setLogoError(true)}
     />
   );
@@ -126,7 +140,7 @@ function AppTile({
             : app.description
         }
       >
-        <div className="ui-app-glyph-icon-wrap">{logoNode}</div>
+        <div className="ui-app-glyph-icon-wrap" style={iconWrapStyle}>{logoNode}</div>
         <div className="ui-app-glyph-name">{app.name}</div>
 
         <div className="mt-1">
@@ -142,7 +156,7 @@ function AppTile({
       onClick={onNavigate}
       className="ui-app-glyph ui-app-glyph--active"
     >
-      <div className="ui-app-glyph-icon-wrap">{logoNode}</div>
+      <div className="ui-app-glyph-icon-wrap" style={iconWrapStyle}>{logoNode}</div>
       <div className="ui-app-glyph-name">{app.name}</div>
 
       <div className="mt-1">

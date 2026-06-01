@@ -67,6 +67,112 @@ function money(value: number) {
   return `$${new Intl.NumberFormat("es-CO", { maximumFractionDigits: 0 }).format(Number(value))}`;
 }
 
+type UnitFamily = "mass" | "volume" | "count";
+
+type UnitInfo = {
+  family: UnitFamily;
+  factorToBase: number;
+};
+
+const UNIT_INFO: Record<string, UnitInfo> = {
+  mg: { family: "mass", factorToBase: 0.001 },
+  miligramo: { family: "mass", factorToBase: 0.001 },
+  miligramos: { family: "mass", factorToBase: 0.001 },
+  g: { family: "mass", factorToBase: 1 },
+  gr: { family: "mass", factorToBase: 1 },
+  gramo: { family: "mass", factorToBase: 1 },
+  gramos: { family: "mass", factorToBase: 1 },
+  kg: { family: "mass", factorToBase: 1000 },
+  kilo: { family: "mass", factorToBase: 1000 },
+  kilos: { family: "mass", factorToBase: 1000 },
+  kilogramo: { family: "mass", factorToBase: 1000 },
+  kilogramos: { family: "mass", factorToBase: 1000 },
+
+  ml: { family: "volume", factorToBase: 1 },
+  mililitro: { family: "volume", factorToBase: 1 },
+  mililitros: { family: "volume", factorToBase: 1 },
+  l: { family: "volume", factorToBase: 1000 },
+  lt: { family: "volume", factorToBase: 1000 },
+  lts: { family: "volume", factorToBase: 1000 },
+  litro: { family: "volume", factorToBase: 1000 },
+  litros: { family: "volume", factorToBase: 1000 },
+
+  un: { family: "count", factorToBase: 1 },
+  und: { family: "count", factorToBase: 1 },
+  unidad: { family: "count", factorToBase: 1 },
+  unidades: { family: "count", factorToBase: 1 },
+  porcion: { family: "count", factorToBase: 1 },
+  porciones: { family: "count", factorToBase: 1 },
+  empaque: { family: "count", factorToBase: 1 },
+  empaques: { family: "count", factorToBase: 1 },
+  bolsa: { family: "count", factorToBase: 1 },
+  bolsas: { family: "count", factorToBase: 1 },
+};
+
+const MAX_AUTO_PACKAGE_ROWS = 150;
+
+function unitKey(value: string | null | undefined) {
+  const raw = String(value ?? "").trim().toLowerCase();
+  const firstSegment = raw.split(/\s+-\s+/)[0]?.trim() || raw;
+  return firstSegment
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function getUnitInfo(value: string | null | undefined) {
+  return UNIT_INFO[unitKey(value)] ?? null;
+}
+
+function convertQty(params: {
+  qty: number;
+  fromUnit: string | null | undefined;
+  toUnit: string | null | undefined;
+}) {
+  const qtyValue = Number(params.qty);
+  if (!Number.isFinite(qtyValue)) {
+    return { qty: 0, compatible: false };
+  }
+
+  const from = getUnitInfo(params.fromUnit);
+  const to = getUnitInfo(params.toUnit);
+
+  if (from && to && from.family === to.family) {
+    return {
+      qty: roundQty((qtyValue * from.factorToBase) / to.factorToBase),
+      compatible: true,
+    };
+  }
+
+  const fromKey = unitKey(params.fromUnit);
+  const toKey = unitKey(params.toUnit);
+
+  if (!fromKey || !toKey || fromKey === toKey) {
+    return { qty: roundQty(qtyValue), compatible: true };
+  }
+
+  return { qty: roundQty(qtyValue), compatible: false };
+}
+
+function resolveStandardPackageQty(params: {
+  portionSize: number;
+  portionUnit: string;
+  expectedYieldQty: number;
+  expectedYieldUnit: string;
+  producedQty: number;
+}) {
+  if (params.portionSize > 0) {
+    return convertQty({
+      qty: params.portionSize,
+      fromUnit: params.portionUnit || params.expectedYieldUnit,
+      toUnit: params.expectedYieldUnit,
+    });
+  }
+
+  const fallbackQty = params.expectedYieldQty > 0 ? params.expectedYieldQty : params.producedQty;
+  return { qty: roundQty(fallbackQty), compatible: true };
+}
+
 function makePackageId() {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
   return `pkg-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -103,6 +209,21 @@ function buildSuggestedPackages(params: {
 
   const fullCount = Math.floor(producedQty / expectedQty);
   const remainder = roundQty(producedQty - fullCount * expectedQty);
+
+  if (fullCount + (remainder > 0.001 ? 1 : 0) > MAX_AUTO_PACKAGE_ROWS) {
+    return [
+      {
+        localId: makePackageId(),
+        packageIndex: 1,
+        label: "Lote empacado",
+        expectedQty,
+        actualQty: producedQty,
+        unitCode,
+        notes: `Sugerencia agregada: la porción estándar genera más de ${MAX_AUTO_PACKAGE_ROWS} filas. Divide manualmente si necesitas trazabilidad por empaque.`,
+      },
+    ];
+  }
+
   const packages: PackageState[] = [];
 
   if (remainder > 0.001 && remainder < expectedQty * 0.35 && fullCount > 0) {
@@ -186,7 +307,14 @@ export function ProductionBatchRealForm({
   const [producedQtyInput, setProducedQtyInput] = useState(String(initialProducedQty));
   const producedQty = roundQty(Number(producedQtyInput));
   const safeProducedQty = Number.isFinite(producedQty) && producedQty > 0 ? producedQty : 0;
-  const standardPackageQty = portionSize > 0 ? portionSize : expectedYieldQty > 0 ? expectedYieldQty : safeProducedQty;
+  const standardPackage = resolveStandardPackageQty({
+    portionSize,
+    portionUnit,
+    expectedYieldQty,
+    expectedYieldUnit,
+    producedQty: safeProducedQty,
+  });
+  const standardPackageQty = standardPackage.qty;
   const packageUnit = expectedYieldUnit || portionUnit || "un";
 
   const [ingredientRows, setIngredientRows] = useState<IngredientState[]>(() =>
@@ -322,12 +450,12 @@ export function ProductionBatchRealForm({
   const disabled = safeProducedQty <= 0 || ingredientRows.length <= 0 || !packageMatchesOutput;
 
   return (
-    <form action={action} className="grid gap-6 xl:grid-cols-[1fr_380px]">
+    <form action={action} className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
       <input type="hidden" name="recipe_id" value={recipeId} />
       <input type="hidden" name="ingredients_payload" value={JSON.stringify(ingredientPayload)} />
       <input type="hidden" name="packages_payload" value={JSON.stringify(packagePayload)} />
 
-      <section className="space-y-6">
+      <section className="min-w-0 space-y-6">
         <div className="ui-panel">
           <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
             <div>
@@ -337,6 +465,11 @@ export function ProductionBatchRealForm({
                 {areaLabel} · esperado {fmt(expectedYieldQty)} {expectedYieldUnit}
                 {portionSize > 0 ? ` · porción estándar ${fmt(portionSize)} ${portionUnit || expectedYieldUnit}` : ""}
               </p>
+              {portionSize > 0 && !standardPackage.compatible ? (
+                <div className="mt-3 ui-alert ui-alert--warn">
+                  La unidad de porción no es compatible con la unidad de rendimiento. La sugerencia de empaque queda agregada y debe ajustarse manualmente.
+                </div>
+              ) : null}
             </div>
             <Link href={backHref} className="ui-btn ui-btn--ghost ui-btn--sm">
               Volver al recetario
@@ -447,6 +580,11 @@ export function ProductionBatchRealForm({
                 </div>
               );
             })}
+            {ingredientRows.length === 0 ? (
+              <div className="ui-empty border-t border-[var(--ui-border)] px-4 py-6">
+                Esta receta no tiene ingredientes activos. Agrega ingredientes en la ficha antes de cerrar producción real.
+              </div>
+            ) : null}
           </div>
           {hasIngredientStockRisk ? (
             <div className="mt-3 ui-alert ui-alert--warn">
@@ -472,13 +610,19 @@ export function ProductionBatchRealForm({
               </button>
             </div>
           </div>
+          {portionSize > 0 ? (
+            <p className="mt-3 text-sm text-[var(--ui-muted)]">
+              Porción estándar convertida para empaque: <strong>{fmt(standardPackageQty)} {packageUnit}</strong>
+              {portionUnit && portionUnit !== packageUnit ? ` (${fmt(portionSize)} ${portionUnit})` : ""}.
+            </p>
+          ) : null}
 
-          <div className="mt-4 overflow-hidden rounded-xl border border-[var(--ui-border)] bg-white">
+          <div className="mt-4 max-h-[520px] overflow-auto rounded-xl border border-[var(--ui-border)] bg-white">
             <div className="hidden grid-cols-[90px_minmax(180px,1fr)_120px_140px_minmax(180px,1fr)_90px] gap-3 border-b border-[var(--ui-border)] bg-[var(--ui-bg-soft)] px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-[var(--ui-muted)] lg:grid">
               <div>#</div>
               <div>Etiqueta</div>
-              <div>Esperado</div>
-              <div>Peso real</div>
+              <div>Esperado ({packageUnit})</div>
+              <div>Peso real ({packageUnit})</div>
               <div>Notas</div>
               <div></div>
             </div>
@@ -558,7 +702,7 @@ export function ProductionBatchRealForm({
         </div>
       </section>
 
-      <aside className="ui-panel h-fit space-y-4 xl:sticky xl:top-6">
+      <aside className="ui-panel min-w-0 h-fit space-y-4 xl:sticky xl:top-6">
         <h2 className="ui-h2">Confirmación</h2>
         <label className="block">
           <span className="ui-label">LOC destino del terminado</span>

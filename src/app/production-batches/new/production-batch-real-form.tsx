@@ -525,13 +525,13 @@ export function ProductionBatchRealForm({
           </div>
         </div>
 
-        <div className="ui-panel">
+        <div className="ui-panel min-w-0">
           <h2 className="ui-h2">2. Consumo real de ingredientes</h2>
           <p className="mt-1 ui-body-muted">
             El real usado viene precargado igual al teórico, pero debe poder corregirse antes de cerrar el lote.
           </p>
-          <div className="mt-4 overflow-hidden rounded-xl border border-[var(--ui-border)] bg-white">
-            <div className="hidden grid-cols-[minmax(220px,1.3fr)_120px_150px_120px_120px] gap-3 border-b border-[var(--ui-border)] bg-[var(--ui-bg-soft)] px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-[var(--ui-muted)] lg:grid">
+          <div className="mt-4 overflow-x-auto rounded-xl border border-[var(--ui-border)] bg-white">
+            <div className="hidden min-w-[760px] grid-cols-[minmax(220px,1.3fr)_120px_150px_120px_120px] gap-3 border-b border-[var(--ui-border)] bg-[var(--ui-bg-soft)] px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-[var(--ui-muted)] lg:grid">
               <div>Ingrediente</div>
               <div>Teórico</div>
               <div>Real usado</div>
@@ -542,7 +542,7 @@ export function ProductionBatchRealForm({
               const diff = roundQty(ingredient.actualQty - ingredient.requiredQty);
               const stockRisk = ingredient.actualQty > ingredient.availableQty + 0.000001;
               return (
-                <div key={ingredient.ingredientProductId} className="grid gap-3 border-t border-[var(--ui-border)] px-4 py-3 first:border-t-0 lg:grid-cols-[minmax(220px,1.3fr)_120px_150px_120px_120px] lg:items-center">
+                <div key={ingredient.ingredientProductId} className="grid gap-3 border-t border-[var(--ui-border)] px-4 py-3 first:border-t-0 lg:min-w-[760px] lg:grid-cols-[minmax(220px,1.3fr)_120px_150px_120px_120px] lg:items-center">
                   <div className="min-w-0">
                     <div className="text-sm font-semibold text-[var(--ui-text)]">{ingredient.productName}</div>
                     <div className="mt-1 text-xs text-[var(--ui-muted)]">{ingredient.sku || "Sin SKU"}</div>
@@ -617,8 +617,8 @@ export function ProductionBatchRealForm({
             </p>
           ) : null}
 
-          <div className="mt-4 max-h-[520px] overflow-auto rounded-xl border border-[var(--ui-border)] bg-white">
-            <div className="hidden grid-cols-[90px_minmax(180px,1fr)_120px_140px_minmax(180px,1fr)_90px] gap-3 border-b border-[var(--ui-border)] bg-[var(--ui-bg-soft)] px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-[var(--ui-muted)] lg:grid">
+          <div className="mt-4 max-h-[520px] overflow-x-auto overflow-y-auto rounded-xl border border-[var(--ui-border)] bg-white">
+            <div className="hidden min-w-[940px] grid-cols-[90px_minmax(180px,1fr)_120px_140px_minmax(180px,1fr)_90px] gap-3 border-b border-[var(--ui-border)] bg-[var(--ui-bg-soft)] px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-[var(--ui-muted)] lg:grid">
               <div>#</div>
               <div>Etiqueta</div>
               <div>Esperado ({packageUnit})</div>
@@ -627,7 +627,7 @@ export function ProductionBatchRealForm({
               <div></div>
             </div>
             {normalizePackageIndexes(packages).map((entry) => (
-              <div key={entry.localId} className="grid gap-3 border-t border-[var(--ui-border)] px-4 py-3 first:border-t-0 lg:grid-cols-[90px_minmax(180px,1fr)_120px_140px_minmax(180px,1fr)_90px] lg:items-center">
+              <div key={entry.localId} className="grid gap-3 border-t border-[var(--ui-border)] px-4 py-3 first:border-t-0 lg:min-w-[940px] lg:grid-cols-[90px_minmax(180px,1fr)_120px_140px_minmax(180px,1fr)_90px] lg:items-center">
                 <div className="text-sm font-semibold text-[var(--ui-text)]">Empaque {entry.packageIndex}</div>
                 <label className="block">
                   <span className="lg:hidden ui-label">Etiqueta</span>

@@ -47,7 +47,11 @@ type RecipeCardRow = {
 type IngredientRow = {
   ingredient_product_id: string;
   quantity: number | null;
-  products?: Relation<ProductShape & { cost: number | null }>;
+};
+
+type IngredientProductRow = ProductShape & {
+  id: string;
+  cost: number | null;
 };
 
 type LocationRow = {
@@ -301,10 +305,14 @@ export default async function NewProductionBatchPage({
     );
   }
 
-  const [{ data: ingredientRows }, { data: locationsData }, { data: productSiteSettingData }] = await Promise.all([
+  const [
+    { data: ingredientRowsData, error: ingredientRowsError },
+    { data: locationsData },
+    { data: productSiteSettingData },
+  ] = await Promise.all([
     supabase
       .from("recipes")
-      .select("ingredient_product_id,quantity,products(id,name,sku,unit,stock_unit_code,cost)")
+      .select("ingredient_product_id,quantity")
       .eq("product_id", recipe.product_id)
       .eq("is_active", true)
       .order("created_at", { ascending: true }),
@@ -323,26 +331,56 @@ export default async function NewProductionBatchPage({
       .maybeSingle(),
   ]);
 
-  const ingredients = (ingredientRows ?? []) as IngredientRow[];
+  if (ingredientRowsError) {
+    return (
+      <div className="ui-panel">
+        <h1 className="ui-h1">No se pudieron cargar los ingredientes</h1>
+        <p className="mt-2 ui-body-muted">{ingredientRowsError.message}</p>
+        <Link href="/recipe-book" className="mt-4 ui-btn ui-btn--brand">
+          Volver al recetario
+        </Link>
+      </div>
+    );
+  }
+
+  const ingredients = (ingredientRowsData ?? []) as IngredientRow[];
   const locations = (locationsData ?? []) as LocationRow[];
   const productSiteSetting = productSiteSettingData as ProductSiteSettingRow | null;
   const configuredProductionLocationId = String(productSiteSetting?.production_location_id ?? "").trim();
   const configuredProductionLocation = configuredProductionLocationId
     ? locations.find((location) => location.id === configuredProductionLocationId) ?? null
     : null;
-  const ingredientIds = ingredients.map((row) => row.ingredient_product_id);
+  const ingredientIds = Array.from(
+    new Set(
+      ingredients
+        .map((row) => String(row.ingredient_product_id ?? "").trim())
+        .filter(Boolean)
+    )
+  );
   const stockLocationIds = configuredProductionLocationId
     ? [configuredProductionLocationId]
     : locations.map((row) => row.id);
 
-  const { data: stockData } =
+  const [{ data: ingredientProductsData }, { data: stockData }] = await Promise.all([
+    ingredientIds.length
+      ? supabase
+          .from("products")
+          .select("id,name,sku,unit,stock_unit_code,cost")
+          .in("id", ingredientIds)
+      : Promise.resolve({ data: [] as IngredientProductRow[] }),
     ingredientIds.length && stockLocationIds.length
-      ? await supabase
+      ? supabase
           .from("inventory_stock_by_location")
           .select("location_id,product_id,current_qty")
           .in("product_id", ingredientIds)
           .in("location_id", stockLocationIds)
-      : { data: [] as StockRow[] };
+      : Promise.resolve({ data: [] as StockRow[] }),
+  ]);
+
+  const ingredientProductMap = new Map<string, IngredientProductRow>();
+  for (const ingredientProduct of (ingredientProductsData ?? []) as IngredientProductRow[]) {
+    ingredientProductMap.set(ingredientProduct.id, ingredientProduct);
+  }
 
   const stockByProduct = new Map<string, number>();
   for (const row of (stockData ?? []) as StockRow[]) {
@@ -367,10 +405,10 @@ export default async function NewProductionBatchPage({
     label: locationLabel(location),
   }));
   const ingredientDrafts: ProductionIngredientDraft[] = ingredients.map((row) => {
-    const ingredient = one(row.products);
+    const ingredient = ingredientProductMap.get(String(row.ingredient_product_id ?? ""));
     return {
       ingredientProductId: row.ingredient_product_id,
-      productName: ingredient?.name ?? "Ingrediente",
+      productName: ingredient?.name ?? "Ingrediente sin ficha",
       sku: ingredient?.sku ?? "",
       unitCode: String(ingredient?.stock_unit_code || ingredient?.unit || "un"),
       baseQty: Number(row.quantity ?? 0),

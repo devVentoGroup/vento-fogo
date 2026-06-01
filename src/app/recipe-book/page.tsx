@@ -307,6 +307,13 @@ function recipeHref(params: {
   return `/recipe-book${qs.toString() ? `?${qs.toString()}` : ""}`;
 }
 
+function productionBatchHref(recipeId: string, qty?: number | null) {
+  const qs = new URLSearchParams();
+  qs.set("recipe_id", recipeId);
+  if (qty && qty > 0) qs.set("qty", String(qty));
+  return `/production-batches/new?${qs.toString()}`;
+}
+
 function mergeAreas(primary: AreaShape[], recipes: RecipeCardRow[]) {
   const map = new Map<string, AreaShape>();
   for (const area of primary) {
@@ -676,57 +683,85 @@ export default async function RecipeBookPage({
     const thumb = imageUrl(recipe);
     const active = recipe.id === selectedRecipe?.id;
     const isDraft = isDraftStatus(recipe.status);
+    const isPublished = isPublishedStatus(recipe.status);
     const recipeSite = recipe.site_id ? siteMap.get(recipe.site_id) ?? null : null;
     const qtyForLink = active ? productionQty : null;
+    const detailHref = recipeHref({
+      siteId: selectedSiteId,
+      areaId: selectedAreaId,
+      recipeId: recipe.id,
+      qty: qtyForLink,
+      status: selectedStatus,
+      q: searchTerm,
+    });
+    const produceHref = productionBatchHref(
+      recipe.id,
+      active ? productionQty : Number(recipe.yield_qty ?? 0) || 1
+    );
+
     return (
-      <Link
+      <article
         key={recipe.id}
-        href={recipeHref({
-          siteId: selectedSiteId,
-          areaId: selectedAreaId,
-          recipeId: recipe.id,
-          qty: qtyForLink,
-          status: selectedStatus,
-          q: searchTerm,
-        })}
-        className={`group grid gap-3 rounded-3xl border bg-white/90 p-3 transition hover:-translate-y-0.5 hover:border-[#FDBA74] hover:bg-[#FFFDFC] hover:shadow-[var(--ui-shadow-soft)] ${
-          compact ? "grid-cols-[72px_1fr]" : "grid-cols-[86px_1fr]"
-        } ${active ? "border-[#F97316] bg-[#FFF7ED] shadow-[var(--ui-shadow-soft)]" : "border-[var(--ui-border)]"}`}
+        className={`group rounded-3xl border bg-white/90 p-3 transition hover:-translate-y-0.5 hover:border-[#FDBA74] hover:bg-[#FFFDFC] hover:shadow-[var(--ui-shadow-soft)] ${
+          active ? "border-[#F97316] bg-[#FFF7ED] shadow-[var(--ui-shadow-soft)]" : "border-[var(--ui-border)]"
+        }`}
       >
-        <div
-          className={`${compact ? "h-[72px]" : "h-[86px]"} overflow-hidden rounded-2xl bg-[#FFF7ED] bg-cover bg-center`}
-          style={thumb ? { backgroundImage: `url("${thumb}")` } : undefined}
+        <Link
+          href={detailHref}
+          className={`grid gap-3 ${
+            compact ? "grid-cols-[72px_1fr]" : "grid-cols-[86px_1fr]"
+          }`}
         >
-          {!thumb ? (
-            <div className="flex h-full items-center justify-center text-2xl font-semibold text-[#F97316]">
-              {String(product?.name ?? "R").trim().charAt(0).toUpperCase() || "R"}
+          <div
+            className={`${compact ? "h-[72px]" : "h-[86px]"} overflow-hidden rounded-2xl bg-[#FFF7ED] bg-cover bg-center`}
+            style={thumb ? { backgroundImage: `url("${thumb}")` } : undefined}
+          >
+            {!thumb ? (
+              <div className="flex h-full items-center justify-center text-2xl font-semibold text-[#F97316]">
+                {String(product?.name ?? "R").trim().charAt(0).toUpperCase() || "R"}
+              </div>
+            ) : null}
+          </div>
+          <div className="min-w-0 py-1">
+            <div className="line-clamp-2 text-base font-semibold leading-5 text-[var(--ui-text)]">
+              {product?.name ?? "Producto"}
             </div>
-          ) : null}
-        </div>
-        <div className="min-w-0 py-1">
-          <div className="line-clamp-2 text-base font-semibold leading-5 text-[var(--ui-text)]">
-            {product?.name ?? "Producto"}
+            <div className="mt-1 line-clamp-2 text-xs leading-5 text-[var(--ui-muted)]">
+              {isOwnerScope ? `${siteLabel(recipeSite)} · ${areaLabel(area)}` : areaLabel(area)}
+            </div>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              <span className="inline-flex rounded-full bg-[#FFF7ED] px-2.5 py-1 text-xs font-semibold text-[#C2410C]">
+                {fmt(recipe.yield_qty)} {recipe.yield_unit}
+              </span>
+              {recipe.portion_size ? (
+                <span className="inline-flex rounded-full bg-[#FFFBF5] px-2.5 py-1 text-xs font-semibold text-[#9A3412]">
+                  {fmt(recipe.portion_size)} {recipe.portion_unit ?? recipe.yield_unit}/porc.
+                </span>
+              ) : null}
+              {isManagement && isDraft ? (
+                <span className="inline-flex rounded-full border border-[#FDBA74] bg-[#FFEDD5] px-2.5 py-1 text-xs font-semibold uppercase text-[#C2410C]">
+                  Borrador
+                </span>
+              ) : null}
+            </div>
           </div>
-          <div className="mt-1 line-clamp-2 text-xs leading-5 text-[var(--ui-muted)]">
-            {isOwnerScope ? `${siteLabel(recipeSite)} · ${areaLabel(area)}` : areaLabel(area)}
-          </div>
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            <span className="inline-flex rounded-full bg-[#FFF7ED] px-2.5 py-1 text-xs font-semibold text-[#C2410C]">
-              {fmt(recipe.yield_qty)} {recipe.yield_unit}
+        </Link>
+
+        <div className={`mt-3 flex ${compact ? "flex-col" : "flex-wrap"} gap-2`}>
+          <Link href={detailHref} className="ui-btn ui-btn--ghost ui-btn--sm flex-1">
+            Ver ficha
+          </Link>
+          {isPublished ? (
+            <Link href={produceHref} className="ui-btn ui-btn--brand ui-btn--sm flex-1">
+              Producir lote
+            </Link>
+          ) : (
+            <span className="ui-btn ui-btn--ghost ui-btn--sm pointer-events-none flex-1 opacity-70">
+              Borrador
             </span>
-            {recipe.portion_size ? (
-              <span className="inline-flex rounded-full bg-[#FFFBF5] px-2.5 py-1 text-xs font-semibold text-[#9A3412]">
-                {fmt(recipe.portion_size)} {recipe.portion_unit ?? recipe.yield_unit}/porc.
-              </span>
-            ) : null}
-            {isManagement && isDraft ? (
-              <span className="inline-flex rounded-full border border-[#FDBA74] bg-[#FFEDD5] px-2.5 py-1 text-xs font-semibold uppercase text-[#C2410C]">
-                Borrador
-              </span>
-            ) : null}
-          </div>
+          )}
         </div>
-      </Link>
+      </article>
     );
   };
 
@@ -839,10 +874,10 @@ export default async function RecipeBookPage({
                   </button>
                   {canCreateBatch && selectedRecipeIsPublished ? (
                     <Link
-                      href={`/production-batches/new?recipe_id=${encodeURIComponent(selectedRecipe.id)}&qty=${encodeURIComponent(String(productionQty))}`}
+                      href={productionBatchHref(selectedRecipe.id, productionQty)}
                       className="ui-btn ui-btn--primary ui-btn--sm"
                     >
-                      Producir
+                      Producir lote
                     </Link>
                   ) : (
                     <span className="ui-btn ui-btn--ghost ui-btn--sm pointer-events-none opacity-70">
@@ -851,6 +886,11 @@ export default async function RecipeBookPage({
                   )}
                 </div>
               </form>
+              {selectedRecipeIsPublished ? (
+                <p className="mt-3 text-xs leading-5 text-[var(--ui-muted)]">
+                  El lote se registra en producción real: consumo editable, rendimiento real y empaques del lote.
+                </p>
+              ) : null}
             </aside>
           ) : (
             <aside className="rounded-3xl border border-[#FED7AA] bg-white p-4 shadow-[var(--ui-shadow-soft)]">

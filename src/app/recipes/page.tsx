@@ -1,12 +1,13 @@
-import Link from "next/link";
-
 import { requireAppAccess } from "@/lib/auth/guard";
+import { RecipesLiveManager } from "./recipes-live-manager";
 
 export const dynamic = "force-dynamic";
 
 const APP_ID = "fogo";
-const NEXO_BASE_URL = process.env.NEXT_PUBLIC_NEXO_URL?.replace(/\/$/, "") || "https://nexo.ventogroup.co";
-const FOGO_BASE_URL = process.env.NEXT_PUBLIC_FOGO_URL?.replace(/\/$/, "") || "https://fogo.ventogroup.co";
+const NEXO_BASE_URL =
+  process.env.NEXT_PUBLIC_NEXO_URL?.replace(/\/$/, "") || "https://nexo.ventogroup.co";
+const FOGO_BASE_URL =
+  process.env.NEXT_PUBLIC_FOGO_URL?.replace(/\/$/, "") || "https://fogo.ventogroup.co";
 
 type ProductShape = {
   name: string | null;
@@ -14,6 +15,7 @@ type ProductShape = {
   unit: string | null;
   product_type: string | null;
 };
+
 type AreaShape = { id: string; name: string | null; kind: string | null };
 
 type RecipeCardRow = {
@@ -27,6 +29,7 @@ type RecipeCardRow = {
   products?: ProductShape | ProductShape[] | null;
   areas?: AreaShape | AreaShape[] | null;
 };
+
 type LegacyRecipeRow = {
   product_id: string;
   updated_at?: string | null;
@@ -39,44 +42,6 @@ type FocusProductRow = {
   product_type: string | null;
   unit: string | null;
 };
-
-function asDate(value: string) {
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return "-";
-  return new Intl.DateTimeFormat("es-CO", { dateStyle: "medium", timeStyle: "short" }).format(d);
-}
-
-function qty(value: number | null | undefined) {
-  if (value == null || !Number.isFinite(Number(value))) return "0";
-  return new Intl.NumberFormat("es-CO", { maximumFractionDigits: 3 }).format(Number(value));
-}
-
-function resolveProduct(value: ProductShape | ProductShape[] | null | undefined): ProductShape | null {
-  if (!value) return null;
-  if (Array.isArray(value)) return value[0] ?? null;
-  return value;
-}
-
-function resolveArea(value: AreaShape | AreaShape[] | null | undefined): AreaShape | null {
-  if (!value) return null;
-  if (Array.isArray(value)) return value[0] ?? null;
-  return value;
-}
-
-function productTypeLabel(value: string | null | undefined) {
-  const normalized = String(value ?? "").trim().toLowerCase();
-  if (normalized === "preparacion") return "Preparacion";
-  if (normalized === "venta") return "Producto terminado";
-  return normalized || "Sin tipo";
-}
-
-function buildRecipeNewUrl(params: { productId?: string; siteId?: string; source?: string }) {
-  const url = new URL("/recipes/new", FOGO_BASE_URL);
-  if (params.productId) url.searchParams.set("product_id", params.productId);
-  if (params.siteId) url.searchParams.set("site_id", params.siteId);
-  if (params.source) url.searchParams.set("source", params.source);
-  return url.toString();
-}
 
 export default async function RecipesPage({
   searchParams,
@@ -100,7 +65,7 @@ export default async function RecipesPage({
   const created = String(sp.created ?? "").trim() === "1";
   const saved = String(sp.saved ?? "").trim() === "1";
   const error = String(sp.error ?? "").trim();
-  const searchTerm = String(sp.q ?? "").trim().toLowerCase();
+  const initialSearchTerm = String(sp.q ?? "").trim();
   const productTypeFilter = String(sp.product_type ?? "").trim().toLowerCase();
   const areaFilter = String(sp.area_id ?? "").trim();
 
@@ -112,7 +77,9 @@ export default async function RecipesPage({
 
   let query = supabase
     .from("recipe_cards")
-    .select("id,product_id,site_id,area_id,yield_qty,yield_unit,status,updated_at,products(name,sku,unit,product_type),areas(id,name,kind)")
+    .select(
+      "id,product_id,site_id,area_id,yield_qty,yield_unit,status,updated_at,products(name,sku,unit,product_type),areas(id,name,kind)"
+    )
     .order("updated_at", { ascending: false })
     .limit(500);
 
@@ -129,6 +96,7 @@ export default async function RecipesPage({
     .select("product_id,updated_at")
     .eq("is_active", true)
     .limit(5000);
+
   const legacyRows = ((legacyRowsData ?? []) as unknown[]) as LegacyRecipeRow[];
   const cardProductIds = new Set(recipeCards.map((row) => row.product_id));
   const legacyOnlyProductIds = Array.from(
@@ -145,6 +113,7 @@ export default async function RecipesPage({
       .from("products")
       .select("id,name,sku,unit,product_type")
       .in("id", legacyOnlyProductIds);
+
     legacyProductMap = new Map(
       ((legacyProductsData ?? []) as Array<{
         id: string;
@@ -154,7 +123,12 @@ export default async function RecipesPage({
         product_type: string | null;
       }>).map((row) => [
         row.id,
-        { name: row.name, sku: row.sku, unit: row.unit, product_type: row.product_type },
+        {
+          name: row.name,
+          sku: row.sku,
+          unit: row.unit,
+          product_type: row.product_type,
+        },
       ])
     );
   }
@@ -165,6 +139,7 @@ export default async function RecipesPage({
         .filter((row) => row.product_id === pid)
         .map((row) => String(row.updated_at ?? ""))
         .sort((a, b) => b.localeCompare(a))[0] || new Date(0).toISOString();
+
     return {
       id: `legacy:${pid}`,
       product_id: pid,
@@ -177,13 +152,18 @@ export default async function RecipesPage({
       areas: null,
     };
   });
+
   const allRecipeCards = [...recipeCards, ...legacyRecipeCards].sort((a, b) =>
     String(b.updated_at ?? "").localeCompare(String(a.updated_at ?? ""))
   );
-  const focusedRecipeCard = productId ? recipeCards.find((row) => row.product_id === productId) ?? null : null;
+
+  const focusedRecipeCard = productId
+    ? recipeCards.find((row) => row.product_id === productId) ?? null
+    : null;
 
   let focusedProduct: FocusProductRow | null = null;
   let existingRecipeForFocusedProduct: { id: string; status: string; site_id: string | null } | null = null;
+
   if (productId) {
     const [{ data: productData }, { data: existingCardData }] = await Promise.all([
       supabase
@@ -197,12 +177,14 @@ export default async function RecipesPage({
         .eq("product_id", productId)
         .maybeSingle(),
     ]);
+
     focusedProduct = (productData as FocusProductRow | null) ?? null;
-    existingRecipeForFocusedProduct = (existingCardData as { id: string; status: string; site_id: string | null } | null) ?? null;
+    existingRecipeForFocusedProduct =
+      (existingCardData as { id: string; status: string; site_id: string | null } | null) ?? null;
   }
 
-  const productIds = Array.from(new Set(allRecipeCards.map((r) => r.product_id)));
-  const recipeCardIds = recipeCards.map((r) => r.id);
+  const productIds = Array.from(new Set(allRecipeCards.map((recipe) => recipe.product_id)));
+  const recipeCardIds = recipeCards.map((recipe) => recipe.id);
 
   const [{ data: ingredientRows }, { data: stepRows }] = await Promise.all([
     productIds.length
@@ -239,216 +221,39 @@ export default async function RecipesPage({
     ).values()
   ).sort((a, b) => String(a.name ?? a.kind ?? "").localeCompare(String(b.name ?? b.kind ?? ""), "es"));
 
-  const filteredRecipeCards = allRecipeCards.filter((row) => {
-    const product = resolveProduct(row.products);
-    const productType = String(product?.product_type ?? "").trim().toLowerCase();
-    if (productTypeFilter && productType !== productTypeFilter) return false;
-    if (areaFilter && row.area_id !== areaFilter) return false;
-    if (!searchTerm) return true;
-    const haystack = `${product?.name ?? ""} ${product?.sku ?? ""}`.toLowerCase();
-    return haystack.includes(searchTerm);
-  });
-
-  const published = filteredRecipeCards.filter((r) => r.status === "published").length;
-  const draft = filteredRecipeCards.filter((r) => r.status === "draft").length;
-
   return (
-    <div className="space-y-6">
-      <section className="ui-panel ui-panel--halo">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h1 className="ui-h1">Recetas</h1>
-          <Link
-            href={siteId ? `/recipes/new?site_id=${encodeURIComponent(siteId)}` : "/recipes/new"}
-            className="ui-btn ui-btn--brand ui-btn--sm"
-          >
-            Crear receta
-          </Link>
-        </div>
-        <p className="mt-2 ui-body-muted">
-          Recetario operativo (BOM + pasos). Aqui puedes auditar estado, ingredientes y pasos por producto.
-        </p>
-        {created ? (
-          <div className="mt-3 ui-alert ui-alert--success">
-            Receta creada en borrador. Continua en FOGO para completar ingredientes y pasos.
-          </div>
-        ) : null}
-        {saved ? (
-          <div className="mt-3 ui-alert ui-alert--success">
-            Receta guardada correctamente.
-          </div>
-        ) : null}
-        {error ? <div className="mt-3 ui-alert ui-alert--warn">{error}</div> : null}
-        {productId && focusedProduct ? (
-          <div className="mt-3 ui-panel-soft p-3 text-sm text-[var(--ui-muted)]">
-            <p>
-              Producto foco desde {source === "nexo" ? "NEXO" : "enlace externo"}:
-              <strong className="ml-1 text-[var(--ui-text)]">{focusedProduct.name ?? "Producto"}</strong>
-              <span className="ml-1">({focusedProduct.sku ?? "-"})</span>
-            </p>
-            {existingRecipeForFocusedProduct ? (
-              <p className="mt-1">
-                Ya existe una receta ({existingRecipeForFocusedProduct.status}). Puedes editarla en esta vista.
-              </p>
-            ) : (
-              <div className="mt-2">
-                <a
-                  href={buildRecipeNewUrl({ productId, siteId, source: source || "nexo" })}
-                  className="ui-btn ui-btn--ghost ui-btn--sm"
-                >
-                  Crear receta para este producto
-                </a>
-              </div>
-            )}
-          </div>
-        ) : null}
-        <div className="mt-4 grid gap-3 sm:grid-cols-3">
-          <div className="ui-panel-soft">
-            <div className="ui-label">Total recetas</div>
-            <div className="mt-1 ui-h2">{filteredRecipeCards.length}</div>
-          </div>
-          <div className="ui-panel-soft">
-            <div className="ui-label">Publicadas</div>
-            <div className="mt-1 ui-h2">{published}</div>
-          </div>
-          <div className="ui-panel-soft">
-            <div className="ui-label">Borrador</div>
-            <div className="mt-1 ui-h2">{draft}</div>
-          </div>
-        </div>
-      </section>
-
-      <section className="ui-panel">
-        <div className="mb-4 flex items-center justify-between gap-2">
-          <h2 className="ui-h2">Listado de recetas</h2>
-          <a
-            href={`${NEXO_BASE_URL}/inventory/catalog`}
-            className="ui-btn ui-btn--ghost ui-btn--sm"
-            target="_blank"
-            rel="noreferrer"
-          >
-            Abrir catalogo en NEXO
-          </a>
-        </div>
-        <form className="mb-4 grid gap-3 lg:grid-cols-[minmax(240px,1fr)_220px_240px_auto_auto] lg:items-end">
-          <label className="min-w-[260px] flex-1">
-            <span className="ui-label">Buscar por nombre</span>
-            <input
-              type="text"
-              name="q"
-              defaultValue={String(sp.q ?? "")}
-              placeholder="Ej: galleta, pulled pork, cebolla..."
-              className="ui-input"
-            />
-          </label>
-          <label>
-            <span className="ui-label">Tipo</span>
-            <select name="product_type" defaultValue={productTypeFilter} className="ui-input">
-              <option value="">Todos</option>
-              <option value="preparacion">Preparaciones</option>
-              <option value="venta">Productos terminados</option>
-            </select>
-          </label>
-          <label>
-            <span className="ui-label">Area asignada</span>
-            <select name="area_id" defaultValue={areaFilter} className="ui-input">
-              <option value="">Todas las areas</option>
-              {areaOptions.map((area) => (
-                <option key={area.id} value={area.id}>
-                  {area.name ?? area.kind ?? area.id}
-                </option>
-              ))}
-            </select>
-          </label>
-          {siteId ? <input type="hidden" name="site_id" value={siteId} /> : null}
-          {productId ? <input type="hidden" name="product_id" value={productId} /> : null}
-          {source ? <input type="hidden" name="source" value={source} /> : null}
-          <button type="submit" className="ui-btn ui-btn--brand ui-btn--sm">
-            Buscar
-          </button>
-          <Link
-            href={siteId ? `/recipes?site_id=${encodeURIComponent(siteId)}` : "/recipes"}
-            className="ui-btn ui-btn--ghost ui-btn--sm"
-          >
-            Limpiar
-          </Link>
-        </form>
-
-        <div className="overflow-x-auto">
-          <table className="ui-table min-w-[1120px]">
-            <thead>
-              <tr>
-                <th className="ui-th">Producto</th>
-                <th className="ui-th">SKU</th>
-                <th className="ui-th">Tipo</th>
-                <th className="ui-th">Area</th>
-                <th className="ui-th">Rendimiento</th>
-                <th className="ui-th">Ingredientes</th>
-                <th className="ui-th">Pasos</th>
-                <th className="ui-th">Estado</th>
-                <th className="ui-th">Actualizado</th>
-                <th className="ui-th">Accion</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredRecipeCards.map((row) => {
-                const ingredient = ingredientByProduct.get(row.product_id) ?? { lines: 0, qty: 0 };
-                const steps = row.id.startsWith("legacy:") ? 0 : (stepsByCard.get(row.id) ?? 0);
-                const product = resolveProduct(row.products);
-                const area = resolveArea(row.areas);
-                const productName = product?.name || "Producto";
-                const sku = product?.sku || "-";
-                return (
-                  <tr key={row.id}>
-                    <td className="ui-td">{productName}</td>
-                    <td className="ui-td">{sku}</td>
-                    <td className="ui-td">{productTypeLabel(product?.product_type)}</td>
-                    <td className="ui-td">
-                      {area ? (
-                        <span className="ui-chip ui-chip--brand">{area.name ?? area.kind ?? "Area"}</span>
-                      ) : (
-                        <span className="text-[var(--ui-muted)]">Sin area</span>
-                      )}
-                    </td>
-                    <td className="ui-td">{qty(row.yield_qty)} {row.yield_unit}</td>
-                    <td className="ui-td">{ingredient.lines} lineas</td>
-                    <td className="ui-td">{steps}</td>
-                    <td className="ui-td">
-                      <span className={`ui-chip ${row.status === "published" ? "ui-chip--success" : "ui-chip--warn"}`}>
-                        {row.status}
-                      </span>
-                    </td>
-                    <td className="ui-td">{asDate(row.updated_at)}</td>
-                    <td className="ui-td">
-                      <div className="flex flex-wrap gap-2">
-                        <Link
-                          className="ui-btn ui-btn--ghost ui-btn--sm"
-                          href={`/recipes/new?product_id=${encodeURIComponent(row.product_id)}${siteId ? `&site_id=${encodeURIComponent(siteId)}` : ""}${row.area_id ? `&area_id=${encodeURIComponent(row.area_id)}` : ""}`}
-                        >
-                          Editar ficha
-                        </Link>
-                        <Link className="ui-btn ui-btn--ghost ui-btn--sm" href="/production-batches">
-                          Ver lotes
-                        </Link>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-              {filteredRecipeCards.length === 0 ? (
-                <tr>
-                  <td className="ui-td ui-empty" colSpan={10}>
-                    {searchTerm
-                      ? "No hay recetas que coincidan con ese nombre."
-                      : focusedRecipeCard
-                        ? "No se encontro la receta en la sede activa. Cambia de sede para verla."
-                        : "No hay recetas para la sede activa."}
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
-      </section>
-    </div>
+    <RecipesLiveManager
+      siteId={siteId}
+      productId={productId}
+      source={source}
+      created={created}
+      saved={saved}
+      error={error}
+      initialSearchTerm={initialSearchTerm}
+      initialProductType={productTypeFilter}
+      initialAreaId={areaFilter}
+      recipeCards={allRecipeCards}
+      areaOptions={areaOptions}
+      ingredientStats={Array.from(ingredientByProduct.entries()).map(([product_id, stats]) => ({
+        product_id,
+        lines: stats.lines,
+        qty: stats.qty,
+      }))}
+      stepStats={Array.from(stepsByCard.entries()).map(([recipe_card_id, count]) => ({
+        recipe_card_id,
+        count,
+      }))}
+      focusedProduct={focusedProduct}
+      existingRecipeForFocusedProduct={existingRecipeForFocusedProduct}
+      hasFocusedRecipeCard={Boolean(focusedRecipeCard)}
+      nexoBaseUrl={NEXO_BASE_URL}
+      fogoBaseUrl={FOGO_BASE_URL}
+    />
   );
+}
+
+function resolveArea(value: AreaShape | AreaShape[] | null | undefined): AreaShape | null {
+  if (!value) return null;
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value;
 }

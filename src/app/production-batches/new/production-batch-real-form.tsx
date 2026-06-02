@@ -357,7 +357,6 @@ export function ProductionBatchRealForm({
           expected_qty: roundQty(entry.expectedQty),
           actual_qty: roundQty(entry.actualQty),
           unit_code: entry.unitCode,
-          uom_profile_id: null,
           notes: entry.notes.trim() || null,
         })),
     [packages]
@@ -598,7 +597,8 @@ export function ProductionBatchRealForm({
             <div>
               <h2 className="ui-h2">3. Empaque real del lote</h2>
               <p className="mt-1 ui-body-muted">
-                Cada bolsa o recipiente queda trazable. La suma debe coincidir con el rendimiento real.
+                Cada bolsa o recipiente queda como empaque físico real del lote. No se crean presentaciones manuales
+                para preparaciones; la suma debe coincidir con el rendimiento real.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -612,8 +612,9 @@ export function ProductionBatchRealForm({
           </div>
           {portionSize > 0 ? (
             <p className="mt-3 text-sm text-[var(--ui-muted)]">
-              Porción estándar convertida para empaque: <strong>{fmt(standardPackageQty)} {packageUnit}</strong>
+              Tamaño sugerido por empaque: <strong>{fmt(standardPackageQty)} {packageUnit}</strong>
               {portionUnit && portionUnit !== packageUnit ? ` (${fmt(portionSize)} ${portionUnit})` : ""}.
+              Puedes ajustar pesos reales, agregar empaques o registrar una porción final variable.
             </p>
           ) : null}
 
@@ -735,7 +736,7 @@ export function ProductionBatchRealForm({
           <div className="ui-label">Resumen</div>
           <div className="mt-2 space-y-1 text-sm text-[var(--ui-text)]">
             <div>Ingredientes: <strong>{ingredientRows.length}</strong></div>
-            <div>Empaques: <strong>{packagePayload.length}</strong></div>
+            <div>Empaques físicos: <strong>{packagePayload.length}</strong></div>
             <div>Rendimiento: <strong>{fmt(safeProducedQty)} {expectedYieldUnit}</strong></div>
             <div>Costo real estimado: <strong>{money(totalCost)}</strong></div>
           </div>

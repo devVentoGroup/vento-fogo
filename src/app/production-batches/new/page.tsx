@@ -7,6 +7,7 @@ import {
   ProductionBatchRealForm,
   type ProductionIngredientDraft,
   type ProductionLocationOption,
+  type ProductionOutputMode,
 } from "./production-batch-real-form";
 
 export const dynamic = "force-dynamic";
@@ -72,6 +73,25 @@ type ProductSiteSettingRow = {
   production_location_id: string | null;
 };
 
+type ProductionRouteRow = {
+  id: string;
+  route_name: string | null;
+  external_recipe_id: string | null;
+  input_location_id: string;
+  output_mode: "inventory_stock" | "sellable_stock" | "order_fulfillment" | string | null;
+  output_location_id: string | null;
+  output_position_id: string | null;
+  is_default: boolean | null;
+};
+
+type RecipeRouteLookupRow = {
+  id: string;
+  product_id: string;
+  site_id: string | null;
+  area_id: string | null;
+  areas?: Relation<{ kind: string | null }>;
+};
+
 type IngredientPayloadRow = {
   ingredient_product_id?: unknown;
   required_qty?: unknown;
@@ -117,6 +137,25 @@ function locationLabel(location: LocationRow) {
   return [location.code, location.zone, location.description].filter(Boolean).join(" - ") || location.id;
 }
 
+function outputModeLabel(mode: string | null | undefined) {
+  switch (String(mode ?? "")) {
+    case "inventory_stock":
+      return "Guardar como inventario";
+    case "sellable_stock":
+      return "Listo para vender";
+    case "order_fulfillment":
+      return "Pedido POS / entrega directa";
+    default:
+      return "Guardar como inventario";
+  }
+}
+
+function normalizeProductionOutputMode(mode: string | null | undefined): ProductionOutputMode {
+  if (mode === "sellable_stock") return "sellable_stock";
+  if (mode === "order_fulfillment") return "order_fulfillment";
+  return "inventory_stock";
+}
+
 function buildReturn(recipeId: string, qty: number, destinationLocationId: string, error?: string) {
   const qs = new URLSearchParams();
   if (recipeId) qs.set("recipe_id", recipeId);
@@ -142,6 +181,47 @@ function cleanNullableUuid(value: unknown) {
   return normalized || null;
 }
 
+async function resolveOutputModeForRecipe(
+  supabase: Awaited<ReturnType<typeof requireAppAccess>>["supabase"],
+  recipeId: string
+): Promise<ProductionOutputMode> {
+  const { data: recipeData } = await supabase
+    .from("recipe_cards")
+    .select("id,product_id,site_id,area_id,areas(kind)")
+    .eq("id", recipeId)
+    .maybeSingle();
+
+  const recipe = (recipeData as RecipeRouteLookupRow | null) ?? null;
+  const siteId = String(recipe?.site_id ?? "").trim();
+  const areaKind = String(one(recipe?.areas)?.kind ?? "").trim();
+
+  if (!recipe?.product_id || !siteId || !areaKind) {
+    return "inventory_stock";
+  }
+
+  const { data: routesData } = await supabase
+    .from("product_site_production_routes")
+    .select("id,route_name,external_recipe_id,input_location_id,output_mode,output_location_id,output_position_id,is_default")
+    .eq("product_id", recipe.product_id)
+    .eq("site_id", siteId)
+    .eq("area_kind", areaKind)
+    .eq("is_active", true);
+
+  const routes = (routesData ?? []) as ProductionRouteRow[];
+  const matchingRoutes = routes.filter((route) => {
+    const externalRecipeId = String(route.external_recipe_id ?? "").trim();
+    return !externalRecipeId || externalRecipeId === recipeId;
+  });
+
+  const route =
+    matchingRoutes.find((row) => String(row.external_recipe_id ?? "").trim() === recipeId) ??
+    matchingRoutes.find((row) => Boolean(row.is_default)) ??
+    matchingRoutes[0] ??
+    null;
+
+  return normalizeProductionOutputMode(route?.output_mode);
+}
+
 async function createBatch(formData: FormData) {
   "use server";
 
@@ -157,8 +237,15 @@ async function createBatch(formData: FormData) {
     permissionCode: "production.recipe_book.view",
   });
 
-  if (!recipeId || !destinationLocationId || !Number.isFinite(qty) || qty <= 0) {
-    redirect(buildReturn(recipeId, Number.isFinite(qty) ? qty : 0, destinationLocationId, "Completa receta, rendimiento real y LOC destino."));
+  if (!recipeId || !Number.isFinite(qty) || qty <= 0) {
+    redirect(buildReturn(recipeId, Number.isFinite(qty) ? qty : 0, destinationLocationId, "Completa receta y rendimiento real."));
+  }
+
+  const outputMode = await resolveOutputModeForRecipe(supabase, recipeId);
+  const isOrderFulfillment = outputMode === "order_fulfillment";
+
+  if (!isOrderFulfillment && !destinationLocationId) {
+    redirect(buildReturn(recipeId, qty, destinationLocationId, "Completa el LOC destino del terminado."));
   }
 
   const rawIngredients = parseJsonArray<IngredientPayloadRow>(text(formData.get("ingredients_payload")));
@@ -189,12 +276,12 @@ async function createBatch(formData: FormData) {
     redirect(buildReturn(recipeId, qty, destinationLocationId, "La receta no tiene ingredientes reales para consumir."));
   }
 
-  if (!packages.length) {
+  if (!isOrderFulfillment && !packages.length) {
     redirect(buildReturn(recipeId, qty, destinationLocationId, "Genera o registra al menos un empaque del lote."));
   }
 
   const packagedQty = packages.reduce((acc, row) => acc + row.actual_qty, 0);
-  if (Math.abs(packagedQty - qty) > 0.001) {
+  if (!isOrderFulfillment && Math.abs(packagedQty - qty) > 0.001) {
     redirect(buildReturn(recipeId, qty, destinationLocationId, `El total empacado (${fmt(packagedQty)}) debe coincidir con el rendimiento real (${fmt(qty)}).`));
   }
 
@@ -206,9 +293,9 @@ async function createBatch(formData: FormData) {
   const { data, error } = await callRealProductionBatchRpc("fogo_create_real_production_batch", {
     p_recipe_card_id: recipeId,
     p_produced_qty: qty,
-    p_destination_location_id: destinationLocationId,
+    p_destination_location_id: isOrderFulfillment ? null : destinationLocationId,
     p_ingredients: ingredients,
-    p_packages: packages,
+    p_packages: isOrderFulfillment ? [] : packages,
     p_notes: notes || null,
   });
 
@@ -305,10 +392,14 @@ export default async function NewProductionBatchPage({
     );
   }
 
+  const recipeArea = one(recipe.areas);
+  const recipeAreaKind = String(recipeArea?.kind ?? "").trim();
+
   const [
     { data: ingredientRowsData, error: ingredientRowsError },
     { data: locationsData },
     { data: productSiteSettingData },
+    { data: productionRoutesData },
   ] = await Promise.all([
     supabase
       .from("recipes")
@@ -329,6 +420,17 @@ export default async function NewProductionBatchPage({
       .eq("site_id", recipe.site_id)
       .eq("is_active", true)
       .maybeSingle(),
+    recipeAreaKind
+      ? supabase
+          .from("product_site_production_routes")
+          .select(
+            "id,route_name,external_recipe_id,input_location_id,output_mode,output_location_id,output_position_id,is_default"
+          )
+          .eq("product_id", recipe.product_id)
+          .eq("site_id", recipe.site_id)
+          .eq("area_kind", recipeAreaKind)
+          .eq("is_active", true)
+      : Promise.resolve({ data: [] as ProductionRouteRow[] }),
   ]);
 
   if (ingredientRowsError) {
@@ -346,9 +448,32 @@ export default async function NewProductionBatchPage({
   const ingredients = (ingredientRowsData ?? []) as IngredientRow[];
   const locations = (locationsData ?? []) as LocationRow[];
   const productSiteSetting = productSiteSettingData as ProductSiteSettingRow | null;
-  const configuredProductionLocationId = String(productSiteSetting?.production_location_id ?? "").trim();
+  const productionRoutes = (productionRoutesData ?? []) as ProductionRouteRow[];
+  const matchingProductionRoutes = productionRoutes.filter((route) => {
+    const externalRecipeId = String(route.external_recipe_id ?? "").trim();
+    return !externalRecipeId || externalRecipeId === recipe.id;
+  });
+  const productionRoute =
+    matchingProductionRoutes.find((route) => String(route.external_recipe_id ?? "").trim() === recipe.id) ??
+    matchingProductionRoutes.find((route) => Boolean(route.is_default)) ??
+    matchingProductionRoutes[0] ??
+    null;
+  const routeOutputMode = normalizeProductionOutputMode(
+    String(productionRoute?.output_mode ?? "inventory_stock").trim()
+  );
+  const isOrderFulfillmentRoute = routeOutputMode === "order_fulfillment";
+  const configuredProductionLocationId = String(
+    productionRoute?.input_location_id ?? productSiteSetting?.production_location_id ?? ""
+  ).trim();
   const configuredProductionLocation = configuredProductionLocationId
     ? locations.find((location) => location.id === configuredProductionLocationId) ?? null
+    : null;
+  const configuredOutputLocationId =
+    !isOrderFulfillmentRoute && productionRoute?.output_location_id
+      ? String(productionRoute.output_location_id).trim()
+      : "";
+  const configuredOutputLocation = configuredOutputLocationId
+    ? locations.find((location) => location.id === configuredOutputLocationId) ?? null
     : null;
   const ingredientIds = Array.from(
     new Set(
@@ -388,17 +513,20 @@ export default async function NewProductionBatchPage({
   }
 
   const product = one(recipe.products);
-  const area = one(recipe.areas);
+  const area = recipeArea;
   const producedQty = Number.isFinite(qtyParam) && qtyParam > 0 ? qtyParam : Number(recipe.yield_qty) > 0 ? Number(recipe.yield_qty) : 1;
   const yieldUnit = String(recipe.yield_unit || product?.stock_unit_code || product?.unit || "un").trim();
   const portionSize = Number(recipe.portion_size ?? 0);
   const portionUnit = String(recipe.portion_unit || yieldUnit).trim();
-  const destinationId =
+  const fallbackDestinationId =
     (requestedDestinationId && locations.some((loc) => loc.id === requestedDestinationId) ? requestedDestinationId : "") ||
     configuredProductionLocation?.id ||
     locations.find((loc) => loc.location_type === "production")?.id ||
     locations[0]?.id ||
     "";
+  const destinationId = isOrderFulfillmentRoute
+    ? ""
+    : configuredOutputLocation?.id || fallbackDestinationId;
   const destinationLocation = destinationId ? locations.find((location) => location.id === destinationId) ?? null : null;
   const locationOptions: ProductionLocationOption[] = locations.map((location) => ({
     id: location.id,
@@ -429,14 +557,75 @@ export default async function NewProductionBatchPage({
         {error ? <div className="mt-4 ui-alert ui-alert--warn">{error}</div> : null}
       </section>
 
+      <section className="ui-panel space-y-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <h2 className="ui-h2">Ruta operativa</h2>
+            <p className="mt-2 ui-body-muted">
+              FOGO usará esta ruta para separar el LOC que consume insumos del LOC donde queda lo producido.
+            </p>
+          </div>
+          <span className={productionRoute ? "ui-chip ui-chip--success" : "ui-chip ui-chip--warn"}>
+            {productionRoute ? "Ruta configurada" : "Fallback legacy"}
+          </span>
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-3">
+          <div className="ui-panel-soft">
+            <div className="ui-label">Consume insumos desde</div>
+            <div className="mt-1 font-semibold">
+              {configuredProductionLocation ? locationLabel(configuredProductionLocation) : "Sin LOC de consumo"}
+            </div>
+          </div>
+          <div className="ui-panel-soft">
+            <div className="ui-label">Qué pasa con lo producido</div>
+            <div className="mt-1 font-semibold">{outputModeLabel(routeOutputMode)}</div>
+            {productionRoute?.route_name ? (
+              <div className="mt-1 text-xs text-[var(--ui-muted)]">{productionRoute.route_name}</div>
+            ) : null}
+          </div>
+          <div className="ui-panel-soft">
+            <div className="ui-label">Salida del terminado</div>
+            <div className="mt-1 font-semibold">
+              {isOrderFulfillmentRoute
+                ? "Pedido POS / no crea stock"
+                : destinationLocation
+                  ? locationLabel(destinationLocation)
+                  : "Sin LOC de salida"}
+            </div>
+            {!isOrderFulfillmentRoute && productionRoute?.output_position_id ? (
+              <div className="mt-1 text-xs text-[var(--ui-muted)]">
+                Con ubicación interna configurada.
+              </div>
+            ) : null}
+          </div>
+        </div>
+
+        {!productionRoute ? (
+          <div className="ui-alert ui-alert--warn">
+            No hay ruta operativa configurada para este producto, sede y área. Se usará el comportamiento legacy:
+            LOC de producción del producto o LOC seleccionado como destino.
+          </div>
+        ) : null}
+
+        {isOrderFulfillmentRoute ? (
+          <div className="ui-alert ui-alert--warn">
+            Esta receta está configurada como Pedido POS / entrega directa. Al confirmar, FOGO consumirá ingredientes reales
+            desde el LOC de consumo, pero no creará stock terminado ni empaques.
+          </div>
+        ) : null}
+      </section>
+
       <ProductionBatchRealForm
         action={createBatch}
         recipeId={recipe.id}
         backHref={recipe.id ? `/recipe-book?recipe_id=${encodeURIComponent(recipe.id)}&qty=${encodeURIComponent(String(producedQty))}` : "/recipe-book"}
         destinationLocationId={destinationId}
         destinationLocationLabel={destinationLocation ? locationLabel(destinationLocation) : "Sin LOC destino"}
-        allowDestinationSelection={!configuredProductionLocation}
+        allowDestinationSelection={!productionRoute && !configuredProductionLocation}
         locations={locationOptions}
+        outputMode={routeOutputMode}
+        outputModeLabel={outputModeLabel(routeOutputMode)}
         productName={product?.name ?? "Producto"}
         areaLabel={area?.name ?? area?.kind ?? "Área"}
         expectedYieldQty={Number(recipe.yield_qty ?? 0)}

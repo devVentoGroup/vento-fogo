@@ -10,6 +10,10 @@ type BatchRow = {
   id: string;
   site_id: string;
   product_id: string;
+  production_route_id: string | null;
+  output_mode: string | null;
+  destination_location_id: string | null;
+  destination_position_id: string | null;
   produced_qty: number;
   produced_unit: string;
   expected_qty: number | null;
@@ -27,6 +31,22 @@ type BatchRow = {
 
 type ProductRow = { id: string; name: string | null; sku: string | null };
 type SiteRow = { id: string; name: string | null };
+type ProductionRouteRow = {
+  id: string;
+  route_name: string | null;
+  output_mode: string | null;
+};
+type LocationRow = {
+  id: string;
+  code: string | null;
+  zone: string | null;
+  description: string | null;
+};
+type PositionRow = {
+  id: string;
+  code: string | null;
+  name: string | null;
+};
 
 function asDate(value: string) {
   const d = new Date(value);
@@ -60,6 +80,34 @@ function statusLabel(value: string | null | undefined) {
   }
 }
 
+function outputModeLabel(value: string | null | undefined) {
+  const mode = String(value ?? "").trim();
+  switch (mode) {
+    case "inventory_stock":
+      return "Inventario";
+    case "sellable_stock":
+      return "Listo para vender";
+    case "order_fulfillment":
+      return "Pedido/POS";
+    default:
+      return "Inventario";
+  }
+}
+
+function outputModeClassName(value: string | null | undefined) {
+  const mode = String(value ?? "").trim();
+  if (mode === "sellable_stock") return "ui-chip ui-chip--success";
+  if (mode === "order_fulfillment") return "ui-chip ui-chip--warn";
+  return "ui-chip";
+}
+
+function destinationLabel(location: LocationRow | undefined, position: PositionRow | undefined) {
+  if (!location) return "Sin destino";
+  const locLabel = [location.code, location.zone, location.description].filter(Boolean).join(" - ") || location.id;
+  const posLabel = position ? [position.name, position.code].filter(Boolean).join(" / ") || position.id : "";
+  return posLabel ? `${locLabel} · ${posLabel}` : locLabel;
+}
+
 function packageStatusLabel(value: string | null | undefined) {
   const status = String(value ?? "").trim();
   switch (status) {
@@ -69,6 +117,8 @@ function packageStatusLabel(value: string | null | undefined) {
       return "Pendiente";
     case "not_required":
       return "No requerido";
+    case "not_packaged":
+      return "No empacado";
     default:
       return status || "Sin empaque";
   }
@@ -77,7 +127,7 @@ function packageStatusLabel(value: string | null | undefined) {
 function packageStatusClassName(value: string | null | undefined) {
   const status = String(value ?? "").trim();
   if (status === "packaged") return "ui-chip ui-chip--success";
-  if (status === "pending") return "ui-chip ui-chip--warn";
+  if (status === "pending" || status === "not_packaged") return "ui-chip ui-chip--warn";
   return "ui-chip";
 }
 
@@ -123,6 +173,10 @@ export default async function ProductionBatchesPage({
         "id",
         "site_id",
         "product_id",
+        "production_route_id",
+        "output_mode",
+        "destination_location_id",
+        "destination_position_id",
         "produced_qty",
         "produced_unit",
         "expected_qty",
@@ -151,9 +205,24 @@ export default async function ProductionBatchesPage({
   const productIds = Array.from(new Set(batches.map((batch) => batch.product_id)));
   const siteIds = Array.from(new Set(batches.map((batch) => batch.site_id)));
   const batchIds = batches.map((batch) => batch.id);
+  const routeIds = Array.from(
+    new Set(batches.map((batch) => String(batch.production_route_id ?? "").trim()).filter(Boolean))
+  );
+  const destinationLocationIds = Array.from(
+    new Set(batches.map((batch) => String(batch.destination_location_id ?? "").trim()).filter(Boolean))
+  );
+  const destinationPositionIds = Array.from(
+    new Set(batches.map((batch) => String(batch.destination_position_id ?? "").trim()).filter(Boolean))
+  );
 
-  const [{ data: productsData }, { data: sitesData }, { data: consumptionsData }] =
-    await Promise.all([
+  const [
+    { data: productsData },
+    { data: sitesData },
+    { data: consumptionsData },
+    { data: routesData },
+    { data: destinationLocationsData },
+    { data: destinationPositionsData },
+  ] = await Promise.all([
       productIds.length
         ? supabase.from("products").select("id,name,sku").in("id", productIds)
         : Promise.resolve({ data: [] }),
@@ -166,6 +235,24 @@ export default async function ProductionBatchesPage({
             .select("batch_id,consumed_qty")
             .in("batch_id", batchIds)
         : Promise.resolve({ data: [] }),
+      routeIds.length
+        ? supabase
+            .from("product_site_production_routes")
+            .select("id,route_name,output_mode")
+            .in("id", routeIds)
+        : Promise.resolve({ data: [] }),
+      destinationLocationIds.length
+        ? supabase
+            .from("inventory_locations")
+            .select("id,code,zone,description")
+            .in("id", destinationLocationIds)
+        : Promise.resolve({ data: [] }),
+      destinationPositionIds.length
+        ? supabase
+            .from("inventory_location_positions")
+            .select("id,code,name")
+            .in("id", destinationPositionIds)
+        : Promise.resolve({ data: [] }),
     ]);
 
   const products = new Map<string, ProductRow>(
@@ -173,6 +260,15 @@ export default async function ProductionBatchesPage({
   );
   const sites = new Map<string, SiteRow>(
     ((sitesData ?? []) as unknown as SiteRow[]).map((row) => [row.id, row])
+  );
+  const routes = new Map<string, ProductionRouteRow>(
+    ((routesData ?? []) as unknown as ProductionRouteRow[]).map((row) => [row.id, row])
+  );
+  const destinationLocations = new Map<string, LocationRow>(
+    ((destinationLocationsData ?? []) as unknown as LocationRow[]).map((row) => [row.id, row])
+  );
+  const destinationPositions = new Map<string, PositionRow>(
+    ((destinationPositionsData ?? []) as unknown as PositionRow[]).map((row) => [row.id, row])
   );
 
   const consumptionByBatch = new Map<string, { lines: number; qty: number }>();
@@ -205,6 +301,9 @@ export default async function ProductionBatchesPage({
   const packagedBatchesRecent = recentBatches.filter(
     (row) => String(row.packaging_status ?? "").trim() === "packaged"
   ).length;
+  const orderFulfillmentBatchesRecent = recentBatches.filter(
+    (row) => String(row.output_mode ?? "").trim() === "order_fulfillment"
+  ).length;
 
   return (
     <div className="space-y-6">
@@ -216,8 +315,8 @@ export default async function ProductionBatchesPage({
             </div>
             <h1 className="mt-2 ui-h1">Lotes de producción</h1>
             <p className="mt-2 max-w-2xl ui-body-muted">
-              Ejecuta recetas, registra consumo real, rendimiento real y empaques del lote.
-              La producción terminada queda disponible para NEXO.
+              Ejecuta recetas, registra consumo real, rendimiento real, ruta operativa y destino del lote.
+              Según la ruta, la producción puede entrar a inventario, quedar lista para venta o salir a pedido/POS.
             </p>
           </div>
 
@@ -258,7 +357,7 @@ export default async function ProductionBatchesPage({
             <div className="ui-label">Empaques generados (7 días)</div>
             <div className="mt-1 ui-h2">{fmt(totalPackagesRecent, 0)}</div>
             <div className="mt-1 text-xs text-[var(--ui-muted)]">
-              {packagedBatchesRecent} lote(s) empacado(s)
+              {packagedBatchesRecent} lote(s) empacado(s) · {orderFulfillmentBatchesRecent} POS/directo
             </div>
           </div>
 
@@ -289,13 +388,14 @@ export default async function ProductionBatchesPage({
         </div>
 
         <div className="overflow-x-auto">
-          <table className="ui-table min-w-[1180px]">
+          <table className="ui-table min-w-[1380px]">
             <thead>
               <tr>
                 <th className="ui-th">Fecha</th>
                 <th className="ui-th">Producto</th>
                 <th className="ui-th">SKU</th>
                 <th className="ui-th">Sede</th>
+                <th className="ui-th">Ruta / salida</th>
                 <th className="ui-th">Rendimiento</th>
                 <th className="ui-th">Empaque</th>
                 <th className="ui-th">Consumo real</th>
@@ -309,6 +409,14 @@ export default async function ProductionBatchesPage({
               {batches.map((row) => {
                 const product = products.get(row.product_id);
                 const site = sites.get(row.site_id);
+                const route = row.production_route_id ? routes.get(row.production_route_id) : undefined;
+                const outputMode = row.output_mode || route?.output_mode || "inventory_stock";
+                const destinationLocation = row.destination_location_id
+                  ? destinationLocations.get(row.destination_location_id)
+                  : undefined;
+                const destinationPosition = row.destination_position_id
+                  ? destinationPositions.get(row.destination_position_id)
+                  : undefined;
                 const consumption = consumptionByBatch.get(row.id) ?? { lines: 0, qty: 0 };
                 const delta = batchYieldDelta(row);
                 const producedUnit = row.produced_unit || row.expected_unit || "-";
@@ -328,6 +436,21 @@ export default async function ProductionBatchesPage({
                     </td>
                     <td className="ui-td">{product?.sku ?? "-"}</td>
                     <td className="ui-td">{site?.name ?? row.site_id}</td>
+                    <td className="ui-td">
+                      <div>
+                        <span className={outputModeClassName(outputMode)}>
+                          {outputModeLabel(outputMode)}
+                        </span>
+                      </div>
+                      <div className="mt-2 text-sm font-medium text-[var(--ui-text)]">
+                        {route?.route_name ?? (row.production_route_id ? "Ruta configurada" : "Fallback legacy")}
+                      </div>
+                      <div className="mt-1 text-xs text-[var(--ui-muted)]">
+                        {String(outputMode).trim() === "order_fulfillment"
+                          ? "Pedido/POS · no crea stock terminado"
+                          : destinationLabel(destinationLocation, destinationPosition)}
+                      </div>
+                    </td>
                     <td className="ui-td">
                       <div className="font-medium text-[var(--ui-text)]">
                         Real: {fmt(row.produced_qty)} {producedUnit}
@@ -352,22 +475,35 @@ export default async function ProductionBatchesPage({
                       ) : null}
                     </td>
                     <td className="ui-td">
-                      <div>
-                        <span className={packageStatusClassName(row.packaging_status)}>
-                          {packageStatusLabel(row.packaging_status)}
-                        </span>
-                      </div>
-                      <div className="mt-2 text-xs text-[var(--ui-muted)]">
-                        {packageCount > 0
-                          ? `${fmt(packageCount, 0)} empaque(s)`
-                          : "Sin empaques"}
-                        {packagedQty > 0 ? (
-                          <>
-                            {" "}
-                            · {fmt(packagedQty)} {row.packaged_unit ?? producedUnit}
-                          </>
-                        ) : null}
-                      </div>
+                      {String(outputMode).trim() === "order_fulfillment" ? (
+                        <>
+                          <div>
+                            <span className="ui-chip">No aplica</span>
+                          </div>
+                          <div className="mt-2 text-xs text-[var(--ui-muted)]">
+                            Consumo contra pedido/POS, sin empaque físico de stock.
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div>
+                            <span className={packageStatusClassName(row.packaging_status)}>
+                              {packageStatusLabel(row.packaging_status)}
+                            </span>
+                          </div>
+                          <div className="mt-2 text-xs text-[var(--ui-muted)]">
+                            {packageCount > 0
+                              ? `${fmt(packageCount, 0)} empaque(s)`
+                              : "Sin empaques"}
+                            {packagedQty > 0 ? (
+                              <>
+                                {" "}
+                                · {fmt(packagedQty)} {row.packaged_unit ?? producedUnit}
+                              </>
+                            ) : null}
+                          </div>
+                        </>
+                      )}
                     </td>
                     <td className="ui-td">
                       {consumption.lines} línea(s) / {fmt(consumption.qty)}
@@ -383,7 +519,7 @@ export default async function ProductionBatchesPage({
 
               {batches.length === 0 ? (
                 <tr>
-                  <td className="ui-td ui-empty" colSpan={10}>
+                  <td className="ui-td ui-empty" colSpan={11}>
                     No hay lotes registrados para la sede activa.
                     <div className="mt-3">
                       <Link href="/production-batches/new" className="ui-btn ui-btn--brand">

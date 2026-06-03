@@ -18,6 +18,8 @@ export type ProductionLocationOption = {
   label: string;
 };
 
+export type ProductionOutputMode = "inventory_stock" | "sellable_stock" | "order_fulfillment";
+
 type IngredientState = ProductionIngredientDraft & {
   requiredQty: number;
   actualQty: number;
@@ -41,6 +43,8 @@ type ProductionBatchRealFormProps = {
   destinationLocationLabel: string;
   allowDestinationSelection: boolean;
   locations: ProductionLocationOption[];
+  outputMode?: ProductionOutputMode;
+  outputModeLabel?: string;
   productName: string;
   areaLabel: string;
   expectedYieldQty: number;
@@ -286,6 +290,12 @@ function normalizePackageIndexes(packages: PackageState[]) {
   }));
 }
 
+function defaultOutputModeLabel(mode: ProductionOutputMode) {
+  if (mode === "order_fulfillment") return "Pedido POS / entrega directa";
+  if (mode === "sellable_stock") return "Listo para vender";
+  return "Guardar como inventario";
+}
+
 export function ProductionBatchRealForm({
   action,
   recipeId,
@@ -294,6 +304,8 @@ export function ProductionBatchRealForm({
   destinationLocationLabel,
   allowDestinationSelection,
   locations,
+  outputMode = "inventory_stock",
+  outputModeLabel,
   productName,
   areaLabel,
   expectedYieldQty,
@@ -316,6 +328,8 @@ export function ProductionBatchRealForm({
   });
   const standardPackageQty = standardPackage.qty;
   const packageUnit = expectedYieldUnit || portionUnit || "un";
+  const isOrderFulfillment = outputMode === "order_fulfillment";
+  const resolvedOutputModeLabel = outputModeLabel || defaultOutputModeLabel(outputMode);
 
   const [ingredientRows, setIngredientRows] = useState<IngredientState[]>(() =>
     ingredients.map((ingredient) => {
@@ -364,7 +378,9 @@ export function ProductionBatchRealForm({
 
   const totalPackaged = roundQty(packagePayload.reduce((acc, entry) => acc + Number(entry.actual_qty ?? 0), 0));
   const packageDiff = roundQty(totalPackaged - safeProducedQty);
-  const packageMatchesOutput = safeProducedQty > 0 && Math.abs(packageDiff) <= 0.001;
+  const packageMatchesOutput =
+    isOrderFulfillment || (safeProducedQty > 0 && Math.abs(packageDiff) <= 0.001);
+  const effectivePackagePayload = isOrderFulfillment ? [] : packagePayload;
   const totalCost = ingredientRows.reduce((acc, ingredient) => acc + Number(ingredient.actualQty ?? 0) * Number(ingredient.cost ?? 0), 0);
   const unitCost = safeProducedQty > 0 ? totalCost / safeProducedQty : 0;
   const hasIngredientStockRisk = ingredientRows.some((ingredient) => ingredient.actualQty > ingredient.availableQty + 0.000001);
@@ -446,13 +462,13 @@ export function ProductionBatchRealForm({
     setPackages((prev) => normalizePackageIndexes(prev.filter((entry) => entry.localId !== localId)));
   };
 
-  const disabled = safeProducedQty <= 0 || ingredientRows.length <= 0 || !packageMatchesOutput;
+  const disabled = safeProducedQty <= 0 || ingredientRows.length <= 0 || (!isOrderFulfillment && !packageMatchesOutput);
 
   return (
     <form action={action} className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
       <input type="hidden" name="recipe_id" value={recipeId} />
       <input type="hidden" name="ingredients_payload" value={JSON.stringify(ingredientPayload)} />
-      <input type="hidden" name="packages_payload" value={JSON.stringify(packagePayload)} />
+      <input type="hidden" name="packages_payload" value={JSON.stringify(effectivePackagePayload)} />
 
       <section className="min-w-0 space-y-6">
         <div className="ui-panel">
@@ -481,7 +497,7 @@ export function ProductionBatchRealForm({
             <div>
               <h2 className="ui-h2">1. Rendimiento real</h2>
               <p className="mt-1 ui-body-muted">
-                Registra cuánto salió realmente. Esto define el stock terminado que entra a NEXO.
+                Registra cuánto salió realmente. Según la ruta operativa, esto puede entrar a inventario o quedar como pedido/POS sin stock terminado.
               </p>
             </div>
             <button
@@ -592,6 +608,28 @@ export function ProductionBatchRealForm({
           ) : null}
         </div>
 
+        {isOrderFulfillment ? (
+          <div className="ui-panel">
+            <h2 className="ui-h2">3. Salida a pedido/POS</h2>
+            <p className="mt-1 ui-body-muted">
+              Esta ruta no crea stock terminado ni empaques físicos del lote. FOGO consumirá los ingredientes reales y dejará la producción lista para conectarse al pedido/POS.
+            </p>
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              <div className="rounded-lg border border-[var(--ui-border)] bg-[var(--ui-bg-soft)] p-4">
+                <div className="ui-label">Modo de salida</div>
+                <div className="mt-1 text-xl font-semibold text-[var(--ui-text)]">{resolvedOutputModeLabel}</div>
+              </div>
+              <div className="rounded-lg border border-[var(--ui-border)] bg-[var(--ui-bg-soft)] p-4">
+                <div className="ui-label">Rendimiento real</div>
+                <div className="mt-1 text-xl font-semibold text-[var(--ui-text)]">{fmt(safeProducedQty)} {expectedYieldUnit}</div>
+              </div>
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+                <div className="ui-label">Stock terminado</div>
+                <div className="mt-1 text-xl font-semibold text-[var(--ui-text)]">No se crea</div>
+              </div>
+            </div>
+          </div>
+        ) : (
         <div className="ui-panel">
           <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
             <div>
@@ -701,13 +739,21 @@ export function ProductionBatchRealForm({
             </div>
           </div>
         </div>
+        )}
       </section>
 
       <aside className="ui-panel min-w-0 h-fit space-y-4 xl:sticky xl:top-6">
         <h2 className="ui-h2">Confirmación</h2>
         <label className="block">
-          <span className="ui-label">LOC destino del terminado</span>
-          {allowDestinationSelection ? (
+          <span className="ui-label">{isOrderFulfillment ? "Salida del terminado" : "LOC destino del terminado"}</span>
+          {isOrderFulfillment ? (
+            <>
+              <input type="hidden" name="destination_location_id" value="" />
+              <div className="mt-1 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-950">
+                Pedido POS / entrega directa
+              </div>
+            </>
+          ) : allowDestinationSelection ? (
             <select className="ui-input mt-1" name="destination_location_id" defaultValue={destinationLocationId} required>
               <option value="">Selecciona LOC</option>
               {locations.map((location) => (
@@ -725,7 +771,11 @@ export function ProductionBatchRealForm({
             </>
           )}
           <p className="mt-1 text-xs text-[var(--ui-muted)]">
-            {allowDestinationSelection ? "Sin LOC fijo configurado; selecciona dónde entra el terminado." : "Este producto entra al LOC configurado para producción."}
+            {isOrderFulfillment
+              ? "No se selecciona LOC de destino porque esta ruta no crea stock terminado."
+              : allowDestinationSelection
+                ? "Sin LOC fijo configurado; selecciona dónde entra el terminado."
+                : "Este producto entra al LOC configurado por la ruta operativa."}
           </p>
         </label>
         <label className="block">
@@ -736,18 +786,23 @@ export function ProductionBatchRealForm({
           <div className="ui-label">Resumen</div>
           <div className="mt-2 space-y-1 text-sm text-[var(--ui-text)]">
             <div>Ingredientes: <strong>{ingredientRows.length}</strong></div>
-            <div>Empaques físicos: <strong>{packagePayload.length}</strong></div>
+            <div>Empaques físicos: <strong>{isOrderFulfillment ? 0 : packagePayload.length}</strong></div>
             <div>Rendimiento: <strong>{fmt(safeProducedQty)} {expectedYieldUnit}</strong></div>
             <div>Costo real estimado: <strong>{money(totalCost)}</strong></div>
           </div>
         </div>
-        {!packageMatchesOutput ? (
+        {!isOrderFulfillment && !packageMatchesOutput ? (
           <div className="ui-alert ui-alert--warn">
             El total empacado debe coincidir con el rendimiento real antes de confirmar.
           </div>
         ) : null}
+        {isOrderFulfillment ? (
+          <div className="ui-alert ui-alert--warn">
+            Confirmar esta producción consumirá ingredientes reales, pero no aumentará stock de producto terminado.
+          </div>
+        ) : null}
         <button type="submit" className="ui-btn ui-btn--brand w-full" disabled={disabled}>
-          Confirmar producción real
+          {isOrderFulfillment ? "Confirmar consumo para pedido" : "Confirmar producción real"}
         </button>
         <Link href={backHref} className="ui-btn ui-btn--ghost w-full">
           Volver

@@ -150,7 +150,10 @@ function isRemoteOrPublicPath(value: string) {
   return /^https?:\/\//i.test(value) || value.startsWith("/");
 }
 
-function storageImageUrl(supabase: Awaited<ReturnType<typeof requireAppAccess>>["supabase"], value: string | null | undefined) {
+function storageImageUrl(
+  supabase: Awaited<ReturnType<typeof requireAppAccess>>["supabase"],
+  value: string | null | undefined
+) {
   const path = String(value ?? "").trim();
   if (!path) return "";
   if (isRemoteOrPublicPath(path)) return path;
@@ -171,8 +174,22 @@ function configText(config: Record<string, unknown> | null | undefined, keys: st
 
 function hasVacuumPackaging(config: Record<string, unknown> | null | undefined) {
   if (!config) return false;
-  const keys = ["vacuum_packaging", "is_vacuum_packed", "vacuumPacked", "requires_vacuum"];
+  const keys = [
+    "vacuum_packaging",
+    "is_vacuum_packed",
+    "vacuumPacked",
+    "requires_vacuum",
+    "vacuum",
+    "empaque_vacio",
+  ];
   return keys.some((key) => config[key] === true || String(config[key] ?? "").toLowerCase() === "true");
+}
+
+function printStatusClass(value: string | null | undefined) {
+  const status = String(value ?? "").trim().toLowerCase();
+  if (status === "published") return "status-pill status-published";
+  if (status === "archived") return "status-pill status-archived";
+  return "status-pill status-draft";
 }
 
 export default async function RecipesPdfPage({
@@ -323,7 +340,7 @@ export default async function RecipesPdfPage({
       .reduce((map, recipe) => {
         const area = one(recipe.areas);
         const site = recipe.site_id ? siteMap.get(recipe.site_id) : null;
-        const title = `${siteLabel(site)} · ${areaLabel(area)}`;
+        const title = `${siteLabel(site)} - ${areaLabel(area)}`;
         const key = `${recipe.site_id || "sin_sede"}::${recipe.area_id || "sin_area"}`;
         const group = map.get(key) ?? { key, title, recipes: [] as RecipeCardRow[] };
         group.recipes.push(recipe);
@@ -338,51 +355,669 @@ export default async function RecipesPdfPage({
     timeStyle: "short",
   }).format(new Date());
 
+  const filterText = [
+    selectedStatus === "all" ? "Todos los estados" : statusLabel(selectedStatus),
+    searchTerm ? `Busqueda: ${searchTerm}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
   return (
-    <main className="min-h-screen bg-[#F7F5F2] text-[#1F1B16]">
+    <main className="recipes-pdf-document min-h-screen bg-[#F7F5F2] text-[#211B17]">
       <style>{`
+        :root {
+          --fogo-ink: #211B17;
+          --fogo-muted: #72665D;
+          --fogo-line: #EADDD0;
+          --fogo-soft: #FFF7ED;
+          --fogo-paper: #FFFFFF;
+          --fogo-accent: #F97316;
+          --fogo-accent-dark: #C2410C;
+        }
+
+        .pdf-shell {
+          width: min(1120px, calc(100vw - 32px));
+          margin: 0 auto;
+          padding: 28px 0 52px;
+        }
+
+        .screen-toolbar {
+          position: sticky;
+          top: 0;
+          z-index: 30;
+          border-bottom: 1px solid var(--fogo-line);
+          background: rgba(255,255,255,.96);
+          backdrop-filter: blur(14px);
+        }
+
+        .toolbar-inner {
+          width: min(1120px, calc(100vw - 32px));
+          margin: 0 auto;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          padding: 12px 0;
+        }
+
+        .cover-page,
+        .recipe-page {
+          background: var(--fogo-paper);
+          border: 1px solid var(--fogo-line);
+          border-radius: 28px;
+          box-shadow: 0 18px 50px rgba(67, 48, 28, 0.10);
+          overflow: hidden;
+        }
+
+        .cover-page {
+          min-height: 720px;
+          display: grid;
+          grid-template-rows: 1fr auto;
+        }
+
+        .cover-hero {
+          padding: 48px;
+          background:
+            radial-gradient(circle at 88% 18%, rgba(249,115,22,.16), transparent 30%),
+            linear-gradient(135deg, #FFF7ED 0%, #FFFFFF 58%, #F7F5F2 100%);
+        }
+
+        .eyebrow {
+          color: var(--fogo-accent-dark);
+          font-size: 11px;
+          font-weight: 800;
+          letter-spacing: .22em;
+          text-transform: uppercase;
+        }
+
+        .cover-title {
+          margin-top: 28px;
+          max-width: 760px;
+          font-size: 64px;
+          line-height: .95;
+          font-weight: 800;
+          letter-spacing: -.045em;
+        }
+
+        .cover-subtitle {
+          margin-top: 22px;
+          max-width: 680px;
+          color: var(--fogo-muted);
+          font-size: 18px;
+          line-height: 1.6;
+        }
+
+        .cover-footer {
+          display: grid;
+          grid-template-columns: 1.3fr .7fr .7fr;
+          gap: 12px;
+          padding: 22px 48px 42px;
+        }
+
+        .summary-box,
+        .chapter-card,
+        .metric-card,
+        .info-card,
+        .step-card {
+          border: 1px solid var(--fogo-line);
+          border-radius: 18px;
+          background: #FFFDFC;
+        }
+
+        .summary-box {
+          padding: 18px;
+        }
+
+        .summary-label,
+        .metric-label {
+          color: var(--fogo-muted);
+          font-size: 10px;
+          font-weight: 800;
+          letter-spacing: .12em;
+          text-transform: uppercase;
+        }
+
+        .summary-value {
+          margin-top: 6px;
+          color: var(--fogo-ink);
+          font-size: 26px;
+          font-weight: 800;
+        }
+
+        .section-block {
+          margin-top: 22px;
+        }
+
+        .section-title {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          margin-bottom: 10px;
+        }
+
+        .section-title h2,
+        .section-title h4 {
+          font-size: 18px;
+          font-weight: 800;
+          letter-spacing: -.02em;
+        }
+
+        .toc-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 10px;
+          margin-top: 18px;
+        }
+
+        .chapter-card {
+          padding: 14px 16px;
+        }
+
+        .chapter-name {
+          margin-top: 4px;
+          font-size: 15px;
+          font-weight: 800;
+        }
+
+        .chapter-meta {
+          margin-top: 4px;
+          color: var(--fogo-muted);
+          font-size: 12px;
+        }
+
+        .recipe-page {
+          margin-top: 28px;
+          padding: 26px;
+        }
+
+        .recipe-header {
+          display: grid;
+          grid-template-columns: 118px 1fr;
+          gap: 18px;
+          align-items: stretch;
+        }
+
+        .recipe-photo {
+          width: 118px;
+          height: 118px;
+          border-radius: 22px;
+          overflow: hidden;
+          background: var(--fogo-soft);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: var(--fogo-accent);
+          font-size: 42px;
+          font-weight: 800;
+        }
+
+        .recipe-photo img,
+        .step-photo img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          display: block;
+        }
+
+        .status-row {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+        }
+
+        .status-pill {
+          display: inline-flex;
+          align-items: center;
+          border-radius: 999px;
+          border: 1px solid var(--fogo-line);
+          padding: 5px 9px;
+          font-size: 10px;
+          font-weight: 800;
+          letter-spacing: .08em;
+          text-transform: uppercase;
+        }
+
+        .status-published {
+          border-color: #A7F3D0;
+          background: #ECFDF5;
+          color: #047857;
+        }
+
+        .status-draft {
+          border-color: #FED7AA;
+          background: var(--fogo-soft);
+          color: var(--fogo-accent-dark);
+        }
+
+        .status-archived {
+          border-color: #CBD5E1;
+          background: #F8FAFC;
+          color: #475569;
+        }
+
+        .recipe-title {
+          margin-top: 8px;
+          font-size: 34px;
+          line-height: 1;
+          font-weight: 850;
+          letter-spacing: -.04em;
+        }
+
+        .recipe-sku {
+          margin-top: 6px;
+          color: var(--fogo-accent-dark);
+          font-size: 12px;
+          font-weight: 800;
+        }
+
+        .recipe-description {
+          margin-top: 8px;
+          color: var(--fogo-muted);
+          font-size: 13px;
+          line-height: 1.45;
+        }
+
+        .recipe-location {
+          margin-top: 8px;
+          color: var(--fogo-muted);
+          font-size: 12px;
+          font-weight: 650;
+        }
+
+        .metrics-grid {
+          display: grid;
+          grid-template-columns: repeat(6, minmax(0, 1fr));
+          gap: 8px;
+          margin-top: 18px;
+        }
+
+        .metric-card {
+          padding: 10px 11px;
+        }
+
+        .metric-value {
+          margin-top: 4px;
+          font-size: 15px;
+          line-height: 1.2;
+          font-weight: 850;
+        }
+
+        .detail-grid {
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 8px;
+          margin-top: 8px;
+        }
+
+        .info-card {
+          padding: 10px 11px;
+        }
+
+        .info-value {
+          margin-top: 4px;
+          font-size: 12px;
+          line-height: 1.35;
+          font-weight: 750;
+        }
+
+        .recipe-content-grid {
+          display: grid;
+          grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr);
+          gap: 16px;
+          align-items: start;
+          margin-top: 22px;
+        }
+
+        .ingredient-table {
+          width: 100%;
+          border-collapse: collapse;
+          overflow: hidden;
+          border-radius: 16px;
+          font-size: 12px;
+        }
+
+        .ingredient-table thead {
+          background: var(--fogo-soft);
+          color: var(--fogo-accent-dark);
+          font-size: 9px;
+          letter-spacing: .08em;
+          text-transform: uppercase;
+        }
+
+        .ingredient-table th,
+        .ingredient-table td {
+          border-bottom: 1px solid #F0E4D9;
+          padding: 8px 9px;
+          vertical-align: top;
+        }
+
+        .ingredient-table tbody tr:last-child td {
+          border-bottom: 0;
+        }
+
+        .ingredient-name {
+          font-weight: 800;
+        }
+
+        .muted {
+          color: var(--fogo-muted);
+        }
+
+        .steps-list {
+          display: grid;
+          grid-template-columns: 1fr;
+          gap: 8px;
+        }
+
+        .step-card {
+          padding: 11px;
+          break-inside: avoid;
+        }
+
+        .step-with-photo {
+          display: grid;
+          grid-template-columns: 92px 1fr;
+          gap: 10px;
+        }
+
+        .step-photo {
+          width: 92px;
+          height: 82px;
+          border-radius: 14px;
+          overflow: hidden;
+          background: var(--fogo-soft);
+        }
+
+        .step-head {
+          display: flex;
+          align-items: center;
+          gap: 7px;
+          margin-bottom: 6px;
+        }
+
+        .step-number {
+          width: 25px;
+          height: 25px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 999px;
+          background: var(--fogo-accent);
+          color: #fff;
+          font-size: 11px;
+          font-weight: 850;
+        }
+
+        .step-time {
+          border-radius: 999px;
+          border: 1px solid #FED7AA;
+          background: var(--fogo-soft);
+          color: var(--fogo-accent-dark);
+          padding: 4px 8px;
+          font-size: 10px;
+          font-weight: 800;
+        }
+
+        .step-description {
+          font-size: 12px;
+          line-height: 1.42;
+          font-weight: 650;
+        }
+
+        .step-tip {
+          margin-top: 6px;
+          border-left: 3px solid var(--fogo-accent);
+          background: var(--fogo-soft);
+          border-radius: 10px;
+          padding: 7px 9px;
+          color: var(--fogo-accent-dark);
+          font-size: 11px;
+          line-height: 1.36;
+          font-weight: 750;
+        }
+
+        .empty-box {
+          border: 1px dashed var(--fogo-line);
+          border-radius: 16px;
+          padding: 18px;
+          text-align: center;
+          color: var(--fogo-muted);
+          font-size: 12px;
+        }
+
         @page {
           size: A4;
-          margin: 12mm;
+          margin: 9mm;
         }
 
         @media print {
+          html,
           body {
             background: #ffffff !important;
           }
 
-          .no-print {
-            display: none !important;
+          body * {
+            visibility: hidden !important;
           }
 
-          .print-root {
+          .recipes-pdf-document,
+          .recipes-pdf-document * {
+            visibility: visible !important;
+          }
+
+          .recipes-pdf-document {
+            position: absolute;
+            inset: 0 auto auto 0;
+            width: 100% !important;
+            min-height: auto !important;
+            background: #ffffff !important;
+          }
+
+          .screen-toolbar,
+          .screen-toolbar * {
+            display: none !important;
+            visibility: hidden !important;
+          }
+
+          .pdf-shell {
+            width: 100% !important;
+            margin: 0 !important;
             padding: 0 !important;
           }
 
-          .recipe-sheet {
-            break-inside: avoid;
-            page-break-inside: avoid;
-          }
-
-          .recipe-page-break {
-            break-before: page;
-            page-break-before: always;
-          }
-
-          .shadow-print {
+          .cover-page,
+          .recipe-page {
             box-shadow: none !important;
+            border-radius: 0 !important;
+            border: 0 !important;
+          }
+
+          .cover-page {
+            min-height: calc(297mm - 18mm);
+            page-break-after: always;
+            break-after: page;
+          }
+
+          .cover-hero {
+            padding: 20mm 13mm 12mm;
+          }
+
+          .cover-title {
+            font-size: 48pt;
+          }
+
+          .cover-subtitle {
+            font-size: 12pt;
+          }
+
+          .cover-footer {
+            padding: 8mm 13mm 13mm;
+          }
+
+          .summary-value {
+            font-size: 20pt;
+          }
+
+          .toc-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+
+          .recipe-page {
+            margin: 0 !important;
+            padding: 0 !important;
+            page-break-before: always;
+            break-before: page;
+          }
+
+          .recipe-page-inner {
+            padding: 5mm 3mm 0;
+          }
+
+          .recipe-header {
+            grid-template-columns: 24mm 1fr;
+            gap: 5mm;
+          }
+
+          .recipe-photo {
+            width: 24mm;
+            height: 24mm;
+            border-radius: 6mm;
+            font-size: 24pt;
+          }
+
+          .recipe-title {
+            font-size: 22pt;
+          }
+
+          .recipe-description {
+            font-size: 8.5pt;
+          }
+
+          .recipe-location,
+          .recipe-sku {
+            font-size: 8pt;
+          }
+
+          .metrics-grid {
+            grid-template-columns: repeat(6, minmax(0, 1fr));
+            gap: 2mm;
+            margin-top: 5mm;
+          }
+
+          .detail-grid {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 2mm;
+            margin-top: 2mm;
+          }
+
+          .metric-card,
+          .info-card {
+            border-radius: 4mm;
+            padding: 2.2mm;
+          }
+
+          .metric-label,
+          .summary-label {
+            font-size: 6.2pt;
+          }
+
+          .metric-value {
+            font-size: 9pt;
+          }
+
+          .info-value {
+            font-size: 7.8pt;
+          }
+
+          .recipe-content-grid {
+            grid-template-columns: minmax(0, .88fr) minmax(0, 1.12fr);
+            gap: 4mm;
+            margin-top: 5mm;
+          }
+
+          .section-block {
+            margin-top: 0;
+            break-inside: avoid;
+          }
+
+          .section-title {
+            margin-bottom: 2mm;
+          }
+
+          .section-title h4 {
+            font-size: 11pt;
+          }
+
+          .ingredient-table {
+            font-size: 7.8pt;
+          }
+
+          .ingredient-table th,
+          .ingredient-table td {
+            padding: 1.7mm 2mm;
+          }
+
+          .steps-list {
+            gap: 2mm;
+          }
+
+          .step-card {
+            padding: 2.2mm;
+          }
+
+          .step-with-photo {
+            grid-template-columns: 23mm 1fr;
+            gap: 2.5mm;
+          }
+
+          .step-photo {
+            width: 23mm;
+            height: 19mm;
+            border-radius: 3mm;
+          }
+
+          .step-number {
+            width: 6mm;
+            height: 6mm;
+            font-size: 7pt;
+          }
+
+          .step-time {
+            padding: 1mm 2mm;
+            font-size: 6.6pt;
+          }
+
+          .step-description {
+            font-size: 8pt;
+            line-height: 1.34;
+          }
+
+          .step-tip {
+            margin-top: 1.5mm;
+            padding: 1.8mm 2mm;
+            font-size: 7.2pt;
+            line-height: 1.25;
+          }
+
+          .status-pill {
+            padding: 1.2mm 2.2mm;
+            font-size: 6.5pt;
           }
         }
       `}</style>
 
-      <div className="no-print sticky top-0 z-20 border-b border-[#E8D9C8] bg-white/95 px-4 py-3 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3">
+      <div className="screen-toolbar">
+        <div className="toolbar-inner">
           <div>
-            <div className="text-xs font-semibold uppercase text-[#C2410C]">Vista PDF administrativa</div>
-            <div className="text-sm text-[#6B625A]">{recipes.length} recetas en el documento</div>
+            <div className="eyebrow">Vista PDF administrativa</div>
+            <div className="text-sm text-[#72665D]">{recipes.length} recetas · {filterText}</div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Link href={recipesHref({ siteId: requestedSiteId, areaId: requestedAreaId, status: selectedStatus, q: searchTerm })} className="ui-btn ui-btn--ghost ui-btn--sm">
+            <Link
+              href={recipesHref({ siteId: requestedSiteId, areaId: requestedAreaId, status: selectedStatus, q: searchTerm })}
+              className="ui-btn ui-btn--ghost ui-btn--sm"
+            >
               Volver a administrar
             </Link>
             <PrintRecipesPdfButton />
@@ -390,55 +1025,48 @@ export default async function RecipesPdfPage({
         </div>
       </div>
 
-      <div className="print-root mx-auto max-w-6xl px-4 py-8">
-        <section className="shadow-print overflow-hidden rounded-[32px] border border-[#E8D9C8] bg-white shadow-[var(--ui-shadow-soft)]">
-          <div className="grid gap-8 bg-[linear-gradient(135deg,#FFF7ED_0%,#FFFFFF_56%,#F7F5F2_100%)] p-8 md:grid-cols-[1fr_260px] md:p-12">
-            <div>
-              <img src="/logos/vento-group.svg" alt="Vento Group" className="h-20 w-auto object-contain" />
-              <div className="mt-10 text-xs font-semibold uppercase tracking-[0.28em] text-[#C2410C]">
-                FOGO · Recipe Book administrativo
-              </div>
-              <h1 className="mt-4 max-w-3xl text-5xl font-semibold leading-tight text-[#1F1B16] md:text-7xl">
-                Recetario de produccion
-              </h1>
-              <p className="mt-5 max-w-2xl text-lg leading-8 text-[#6B625A]">
-                Documento interno con fichas tecnicas, ingredientes, parametros de rendimiento y paso a paso operativo.
-              </p>
-            </div>
+      <div className="pdf-shell">
+        <section className="cover-page">
+          <div className="cover-hero">
+            <img src="/logos/vento-group.svg" alt="Vento Group" className="h-20 w-auto object-contain" />
+            <div className="eyebrow mt-14">FOGO · Recetario de produccion</div>
+            <h1 className="cover-title">Fichas tecnicas operativas</h1>
+            <p className="cover-subtitle">
+              Documento interno para produccion: ingredientes, rendimiento, porciones, empaque, conservacion y paso a paso.
+            </p>
+          </div>
 
-            <aside className="rounded-[28px] border border-[#FED7AA] bg-white/90 p-5">
-              <div className="text-xs font-semibold uppercase text-[#C2410C]">Resumen</div>
-              <div className="mt-4 space-y-4">
-                <div>
-                  <div className="text-4xl font-semibold">{recipes.length}</div>
-                  <div className="text-sm text-[#6B625A]">recetas incluidas</div>
-                </div>
-                <div className="h-px bg-[#E8D9C8]" />
-                <div className="text-sm leading-6 text-[#6B625A]">
-                  Generado: <span className="font-semibold text-[#1F1B16]">{generatedAt}</span>
-                </div>
-                <div className="text-sm leading-6 text-[#6B625A]">
-                  Estado: <span className="font-semibold text-[#1F1B16]">{selectedStatus === "all" ? "Todos" : statusLabel(selectedStatus)}</span>
-                </div>
-                {searchTerm ? (
-                  <div className="text-sm leading-6 text-[#6B625A]">
-                    Busqueda: <span className="font-semibold text-[#1F1B16]">{searchTerm}</span>
-                  </div>
-                ) : null}
-              </div>
-            </aside>
+          <div className="cover-footer">
+            <div className="summary-box">
+              <div className="summary-label">Documento</div>
+              <div className="summary-value">Vento Group</div>
+              <div className="mt-2 text-sm leading-6 text-[#72665D]">Generado: {generatedAt}</div>
+            </div>
+            <div className="summary-box">
+              <div className="summary-label">Recetas</div>
+              <div className="summary-value">{recipes.length}</div>
+              <div className="mt-2 text-sm text-[#72665D]">incluidas</div>
+            </div>
+            <div className="summary-box">
+              <div className="summary-label">Filtro</div>
+              <div className="mt-2 text-base font-bold leading-6">{filterText || "Todos"}</div>
+            </div>
           </div>
         </section>
 
-        <section className="mt-8 rounded-[28px] border border-[#E8D9C8] bg-white p-6 shadow-print shadow-[var(--ui-shadow-soft)]">
-          <div className="text-xs font-semibold uppercase text-[#C2410C]">Indice</div>
-          <h2 className="mt-1 text-3xl font-semibold">Capitulos</h2>
-          <div className="mt-5 grid gap-3 md:grid-cols-2">
+        <section className="section-block rounded-[28px] border border-[#EADDD0] bg-white p-6 shadow-[0_18px_50px_rgba(67,48,28,.08)] print:shadow-none">
+          <div className="section-title">
+            <div>
+              <div className="eyebrow">Indice</div>
+              <h2>Capitulos</h2>
+            </div>
+          </div>
+          <div className="toc-grid">
             {recipeGroups.map((group, index) => (
-              <div key={group.key} className="rounded-2xl border border-[#F2E3D3] bg-[#FFFDFC] p-4">
-                <div className="text-xs font-semibold uppercase text-[#C2410C]">Capitulo {index + 1}</div>
-                <div className="mt-1 text-lg font-semibold">{group.title}</div>
-                <div className="mt-1 text-sm text-[#6B625A]">{group.recipes.length} recetas</div>
+              <div key={group.key} className="chapter-card">
+                <div className="eyebrow">Capitulo {index + 1}</div>
+                <div className="chapter-name">{group.title}</div>
+                <div className="chapter-meta">{group.recipes.length} recetas</div>
               </div>
             ))}
           </div>
@@ -447,118 +1075,120 @@ export default async function RecipesPdfPage({
         {recipes.length === 0 ? (
           <section className="mt-8 rounded-[28px] border border-[#FED7AA] bg-white p-8 text-center">
             <h2 className="text-2xl font-semibold">No hay recetas para exportar</h2>
-            <p className="mt-2 text-sm text-[#6B625A]">Ajusta los filtros en Administrar recetas y vuelve a generar el PDF.</p>
+            <p className="mt-2 text-sm text-[#72665D]">Ajusta los filtros en Administrar recetas y vuelve a generar el PDF.</p>
           </section>
         ) : null}
 
-        {recipeGroups.map((group, groupIndex) => (
-          <section key={group.key} className="recipe-page-break mt-8">
-            <div className="mb-5 rounded-[28px] border border-[#FED7AA] bg-[#FFF7ED] p-6">
-              <div className="text-xs font-semibold uppercase text-[#C2410C]">Capitulo {groupIndex + 1}</div>
-              <h2 className="mt-1 text-4xl font-semibold">{group.title}</h2>
-              <p className="mt-2 text-sm text-[#6B625A]">{group.recipes.length} recetas</p>
-            </div>
+        {recipeGroups.flatMap((group, groupIndex) =>
+          group.recipes.map((recipe, recipeIndex) => {
+            const product = one(recipe.products);
+            const area = one(recipe.areas);
+            const site = recipe.site_id ? siteMap.get(recipe.site_id) : null;
+            const ingredients = ingredientsByProductId.get(recipe.product_id) ?? [];
+            const steps = stepsByRecipeCardId.get(recipe.id) ?? [];
+            const firstStepImage = steps.find((step) => step.image_path)?.image_path ?? "";
+            const cover = storageImageUrl(supabase, productImage(recipe) || firstStepImage);
+            const portionText = recipe.portion_size
+              ? `${fmt(recipe.portion_size)} ${recipe.portion_unit ?? recipe.yield_unit}`
+              : "Pendiente";
+            const totalStepMinutes = steps.reduce((acc, step) => acc + Number(step.time_minutes ?? 0), 0);
+            const timeText = recipe.prep_time_minutes
+              ? `${fmt(recipe.prep_time_minutes, 0)} min`
+              : totalStepMinutes > 0
+                ? `${fmt(totalStepMinutes, 0)} min`
+                : "-";
+            const vacuumText = hasVacuumPackaging(recipe.process_config) ? "Si" : "No";
+            const packageType =
+              configText(recipe.process_config, ["package_type", "packaging_type", "bag_type", "tipo_bolsa"]) || "Pendiente";
+            const storageText =
+              configText(recipe.process_config, ["storage_condition", "storage", "conservation", "condicion_almacenamiento"]) || "Pendiente";
 
-            <div className="space-y-8">
-              {group.recipes.map((recipe, recipeIndex) => {
-                const product = one(recipe.products);
-                const area = one(recipe.areas);
-                const site = recipe.site_id ? siteMap.get(recipe.site_id) : null;
-                const ingredients = ingredientsByProductId.get(recipe.product_id) ?? [];
-                const steps = stepsByRecipeCardId.get(recipe.id) ?? [];
-                const cover = productImage(recipe);
-                const portionText = recipe.portion_size
-                  ? `${fmt(recipe.portion_size)} ${recipe.portion_unit ?? recipe.yield_unit}`
-                  : "Pendiente";
-                const vacuumText = hasVacuumPackaging(recipe.process_config) ? "Si" : "No";
-                const packageType =
-                  configText(recipe.process_config, ["package_type", "packaging_type", "bag_type", "tipo_bolsa"]) || "Pendiente";
-                const storageText =
-                  configText(recipe.process_config, ["storage_condition", "storage", "conservation", "condicion_almacenamiento"]) || "Pendiente";
+            return (
+              <article key={recipe.id} className="recipe-page">
+                <div className="recipe-page-inner">
+                  <header className="recipe-header">
+                    <div className="recipe-photo">
+                      {cover ? (
+                        <img src={cover} alt={product?.name ?? "Receta"} />
+                      ) : (
+                        <span>{String(product?.name ?? "R").trim().charAt(0).toUpperCase() || "R"}</span>
+                      )}
+                    </div>
 
-                return (
-                  <article key={recipe.id} className={`recipe-sheet rounded-[30px] border border-[#E8D9C8] bg-white p-6 shadow-print shadow-[var(--ui-shadow-soft)] ${recipeIndex > 0 ? "mt-8" : ""}`}>
-                    <header className="grid gap-5 md:grid-cols-[190px_1fr]">
-                      <div className="h-[190px] overflow-hidden rounded-[26px] bg-[#FFF7ED]">
-                        {cover ? (
-                          <img src={cover} alt={product?.name ?? "Receta"} className="h-full w-full object-cover" />
-                        ) : (
-                          <div className="flex h-full items-center justify-center text-5xl font-semibold text-[#F97316]">
-                            {String(product?.name ?? "R").trim().charAt(0).toUpperCase() || "R"}
-                          </div>
-                        )}
+                    <div>
+                      <div className="status-row">
+                        <span className={printStatusClass(recipe.status)}>{statusLabel(recipe.status)}</span>
+                        {!recipe.is_active ? <span className="status-pill status-archived">Inactiva</span> : null}
+                        <span className="status-pill status-draft">Cap. {groupIndex + 1}</span>
+                        <span className="status-pill status-draft">Ficha {recipeIndex + 1}</span>
                       </div>
+                      <h3 className="recipe-title">{product?.name ?? "Receta"}</h3>
+                      <p className="recipe-sku">{productSku(recipe)}</p>
+                      <p className="recipe-description">
+                        {recipe.recipe_description || "Ficha tecnica de produccion para uso interno de Vento Group."}
+                      </p>
+                      <p className="recipe-location">{siteLabel(site)} - {areaLabel(area)}</p>
+                    </div>
+                  </header>
 
-                      <div>
-                        <div className="flex flex-wrap gap-2">
-                          <span className="rounded-full border border-[#FED7AA] bg-[#FFF7ED] px-3 py-1 text-xs font-semibold uppercase text-[#C2410C]">
-                            {statusLabel(recipe.status)}
-                          </span>
-                          {!recipe.is_active ? (
-                            <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold uppercase text-slate-600">
-                              Inactiva
-                            </span>
-                          ) : null}
+                  <section className="metrics-grid">
+                    <div className="metric-card">
+                      <div className="metric-label">Rendimiento</div>
+                      <div className="metric-value">{fmt(recipe.yield_qty)} {recipe.yield_unit}</div>
+                    </div>
+                    <div className="metric-card">
+                      <div className="metric-label">Porcion</div>
+                      <div className="metric-value">{portionText}</div>
+                    </div>
+                    <div className="metric-card">
+                      <div className="metric-label">Tiempo</div>
+                      <div className="metric-value">{timeText}</div>
+                    </div>
+                    <div className="metric-card">
+                      <div className="metric-label">Vida util</div>
+                      <div className="metric-value">{recipe.shelf_life_days ? `${fmt(recipe.shelf_life_days, 0)} dias` : "-"}</div>
+                    </div>
+                    <div className="metric-card">
+                      <div className="metric-label">Dificultad</div>
+                      <div className="metric-value">{difficultyLabel(recipe.difficulty)}</div>
+                    </div>
+                    <div className="metric-card">
+                      <div className="metric-label">Vacio</div>
+                      <div className="metric-value">{vacuumText}</div>
+                    </div>
+                  </section>
+
+                  <section className="detail-grid">
+                    <div className="info-card">
+                      <div className="metric-label">Empaque</div>
+                      <div className="info-value">{packageType}</div>
+                    </div>
+                    <div className="info-card">
+                      <div className="metric-label">Almacenamiento</div>
+                      <div className="info-value">{storageText}</div>
+                    </div>
+                    <div className="info-card">
+                      <div className="metric-label">Grupo</div>
+                      <div className="info-value">{group.title}</div>
+                    </div>
+                  </section>
+
+                  <section className="recipe-content-grid">
+                    <div className="section-block">
+                      <div className="section-title">
+                        <div>
+                          <div className="eyebrow">Ingredientes</div>
+                          <h4>BOM de receta</h4>
                         </div>
-                        <h3 className="mt-3 text-4xl font-semibold leading-tight">{product?.name ?? "Receta"}</h3>
-                        <p className="mt-2 text-sm font-semibold text-[#C2410C]">{productSku(recipe)}</p>
-                        <p className="mt-3 text-base leading-7 text-[#6B625A]">
-                          {recipe.recipe_description || "Ficha tecnica de produccion para uso interno de Vento Group."}
-                        </p>
-                        <p className="mt-3 text-sm text-[#6B625A]">
-                          {siteLabel(site)} · {areaLabel(area)}
-                        </p>
                       </div>
-                    </header>
-
-                    <section className="mt-6 grid gap-3 md:grid-cols-4">
-                      <div className="rounded-2xl border border-[#FED7AA] bg-[#FFF7ED] p-4">
-                        <div className="text-xs font-semibold uppercase text-[#C2410C]">Rendimiento</div>
-                        <div className="mt-1 text-xl font-semibold">{fmt(recipe.yield_qty)} {recipe.yield_unit}</div>
-                      </div>
-                      <div className="rounded-2xl border border-[#E8D9C8] bg-[#FFFDFC] p-4">
-                        <div className="text-xs font-semibold uppercase text-[#6B625A]">Porcion</div>
-                        <div className="mt-1 text-xl font-semibold">{portionText}</div>
-                      </div>
-                      <div className="rounded-2xl border border-[#E8D9C8] bg-[#FFFDFC] p-4">
-                        <div className="text-xs font-semibold uppercase text-[#6B625A]">Tiempo</div>
-                        <div className="mt-1 text-xl font-semibold">{recipe.prep_time_minutes ? `${fmt(recipe.prep_time_minutes, 0)} min` : "-"}</div>
-                      </div>
-                      <div className="rounded-2xl border border-[#E8D9C8] bg-[#FFFDFC] p-4">
-                        <div className="text-xs font-semibold uppercase text-[#6B625A]">Vida util</div>
-                        <div className="mt-1 text-xl font-semibold">{recipe.shelf_life_days ? `${fmt(recipe.shelf_life_days, 0)} dias` : "-"}</div>
-                      </div>
-                    </section>
-
-                    <section className="mt-4 grid gap-3 md:grid-cols-4">
-                      <div className="rounded-2xl border border-[#E8D9C8] bg-white p-4">
-                        <div className="text-xs font-semibold uppercase text-[#6B625A]">Dificultad</div>
-                        <div className="mt-1 font-semibold">{difficultyLabel(recipe.difficulty)}</div>
-                      </div>
-                      <div className="rounded-2xl border border-[#E8D9C8] bg-white p-4">
-                        <div className="text-xs font-semibold uppercase text-[#6B625A]">Vacio</div>
-                        <div className="mt-1 font-semibold">{vacuumText}</div>
-                      </div>
-                      <div className="rounded-2xl border border-[#E8D9C8] bg-white p-4">
-                        <div className="text-xs font-semibold uppercase text-[#6B625A]">Empaque</div>
-                        <div className="mt-1 font-semibold">{packageType}</div>
-                      </div>
-                      <div className="rounded-2xl border border-[#E8D9C8] bg-white p-4">
-                        <div className="text-xs font-semibold uppercase text-[#6B625A]">Almacenamiento</div>
-                        <div className="mt-1 font-semibold">{storageText}</div>
-                      </div>
-                    </section>
-
-                    <section className="mt-7">
-                      <div className="text-xs font-semibold uppercase text-[#C2410C]">Ingredientes</div>
-                      <div className="mt-3 overflow-hidden rounded-2xl border border-[#E8D9C8]">
-                        <table className="w-full border-collapse text-left text-sm">
-                          <thead className="bg-[#FFF7ED] text-xs uppercase text-[#C2410C]">
+                      <div className="overflow-hidden rounded-2xl border border-[#EADDD0]">
+                        <table className="ingredient-table">
+                          <thead>
                             <tr>
-                              <th className="px-4 py-3">Ingrediente</th>
-                              <th className="px-4 py-3">SKU</th>
-                              <th className="px-4 py-3 text-right">Cantidad</th>
-                              <th className="px-4 py-3">Unidad</th>
+                              <th>Ingrediente</th>
+                              <th>SKU</th>
+                              <th className="text-right">Cant.</th>
+                              <th>Un.</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -567,73 +1197,68 @@ export default async function RecipesPdfPage({
                                 const ingredientProduct = ingredientProductMap.get(String(ingredient.ingredient_product_id ?? ""));
                                 const unit = ingredientProduct?.stock_unit_code || ingredientProduct?.unit || "-";
                                 return (
-                                  <tr key={`${ingredient.ingredient_product_id}-${index}`} className="border-t border-[#F2E3D3]">
-                                    <td className="px-4 py-3 font-semibold">{ingredientProduct?.name ?? "Ingrediente"}</td>
-                                    <td className="px-4 py-3 text-[#6B625A]">{ingredientProduct?.sku ?? "-"}</td>
-                                    <td className="px-4 py-3 text-right font-semibold">{fmt(ingredient.quantity, 3)}</td>
-                                    <td className="px-4 py-3 text-[#6B625A]">{unit}</td>
+                                  <tr key={`${ingredient.ingredient_product_id}-${index}`}>
+                                    <td className="ingredient-name">{ingredientProduct?.name ?? "Ingrediente"}</td>
+                                    <td className="muted">{ingredientProduct?.sku ?? "-"}</td>
+                                    <td className="text-right font-bold">{fmt(ingredient.quantity, 3)}</td>
+                                    <td className="muted">{unit}</td>
                                   </tr>
                                 );
                               })
                             ) : (
                               <tr>
-                                <td colSpan={4} className="px-4 py-5 text-center text-[#6B625A]">
-                                  Sin ingredientes guardados.
-                                </td>
+                                <td colSpan={4} className="text-center muted">Sin ingredientes guardados.</td>
                               </tr>
                             )}
                           </tbody>
                         </table>
                       </div>
-                    </section>
+                    </div>
 
-                    <section className="mt-7">
-                      <div className="text-xs font-semibold uppercase text-[#C2410C]">Paso a paso</div>
-                      <div className="mt-3 space-y-4">
+                    <div className="section-block">
+                      <div className="section-title">
+                        <div>
+                          <div className="eyebrow">Paso a paso</div>
+                          <h4>{steps.length} pasos operativos</h4>
+                        </div>
+                      </div>
+
+                      <div className="steps-list">
                         {steps.length > 0 ? (
                           steps.map((step) => {
                             const image = storageImageUrl(supabase, step.image_path);
                             return (
-                              <div key={step.id} className="rounded-2xl border border-[#E8D9C8] bg-[#FFFDFC] p-4">
-                                <div className={image ? "grid gap-4 md:grid-cols-[180px_1fr]" : ""}>
+                              <div key={step.id} className="step-card">
+                                <div className={image ? "step-with-photo" : ""}>
                                   {image ? (
-                                    <img src={image} alt={`Paso ${step.step_number}`} className="h-[150px] w-full rounded-xl object-cover" />
-                                  ) : null}
-                                  <div>
-                                    <div className="flex flex-wrap items-center gap-2">
-                                      <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[#F97316] text-sm font-semibold text-white">
-                                        {step.step_number}
-                                      </span>
-                                      {step.time_minutes != null ? (
-                                        <span className="rounded-full border border-[#FED7AA] bg-[#FFF7ED] px-3 py-1 text-xs font-semibold text-[#C2410C]">
-                                          {fmt(step.time_minutes, 0)} min
-                                        </span>
-                                      ) : null}
+                                    <div className="step-photo">
+                                      <img src={image} alt={`Paso ${step.step_number}`} />
                                     </div>
-                                    <p className="mt-3 text-base leading-7">{step.description}</p>
-                                    {step.tip ? (
-                                      <div className="mt-3 rounded-xl border border-[#FED7AA] bg-[#FFF7ED] p-3 text-sm font-semibold leading-6 text-[#C2410C]">
-                                        {step.tip}
-                                      </div>
-                                    ) : null}
+                                  ) : null}
+
+                                  <div>
+                                    <div className="step-head">
+                                      <span className="step-number">{step.step_number}</span>
+                                      {step.time_minutes != null ? <span className="step-time">{fmt(step.time_minutes, 0)} min</span> : null}
+                                    </div>
+                                    <p className="step-description">{step.description}</p>
+                                    {step.tip ? <div className="step-tip">{step.tip}</div> : null}
                                   </div>
                                 </div>
                               </div>
                             );
                           })
                         ) : (
-                          <div className="rounded-2xl border border-[#E8D9C8] bg-[#FFFDFC] p-5 text-center text-[#6B625A]">
-                            Sin pasos guardados.
-                          </div>
+                          <div className="empty-box">Sin pasos guardados.</div>
                         )}
                       </div>
-                    </section>
-                  </article>
-                );
-              })}
-            </div>
-          </section>
-        ))}
+                    </div>
+                  </section>
+                </div>
+              </article>
+            );
+          })
+        )}
       </div>
     </main>
   );

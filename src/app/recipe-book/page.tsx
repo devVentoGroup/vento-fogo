@@ -314,24 +314,6 @@ function productionBatchHref(recipeId: string, qty?: number | null) {
   return `/production-batches/new?${qs.toString()}`;
 }
 
-function recipeBookPdfHref(params: {
-  siteId?: string | null;
-  areaId?: string | null;
-  recipeId?: string | null;
-  qty?: number | null;
-  status?: string | null;
-  q?: string | null;
-}) {
-  const qs = new URLSearchParams();
-  if (params.siteId) qs.set("site_id", params.siteId);
-  if (params.areaId) qs.set("area_id", params.areaId);
-  if (params.recipeId) qs.set("recipe_id", params.recipeId);
-  if (params.qty && params.qty > 0) qs.set("qty", String(params.qty));
-  if (params.status && params.status !== "all") qs.set("status", params.status);
-  if (params.q) qs.set("q", params.q);
-  return `/recipe-book/pdf${qs.toString() ? `?${qs.toString()}` : ""}`;
-}
-
 function mergeAreas(primary: AreaShape[], recipes: RecipeCardRow[]) {
   const map = new Map<string, AreaShape>();
   for (const area of primary) {
@@ -694,15 +676,6 @@ export default async function RecipeBookPage({
     visibleRecipeTypeText,
     searchTerm ? `busqueda: ${searchTerm}` : null,
   ].filter(Boolean).join(" · ");
-  const exportPdfHref = recipeBookPdfHref({
-    siteId: selectedSiteId,
-    areaId: selectedAreaId,
-    recipeId: selectedRecipe?.id ?? null,
-    qty: selectedRecipe ? productionQty : null,
-    status: selectedStatus,
-    q: searchTerm,
-  });
-
 
   const renderRecipeCard = (recipe: RecipeCardRow, compact = false) => {
     const product = one(recipe.products);
@@ -948,16 +921,11 @@ export default async function RecipeBookPage({
               Usa sede, area, estado o busqueda. Los resultados se ordenan por area y alfabeto.
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Link href={exportPdfHref} target="_blank" className="ui-btn ui-btn--brand ui-btn--sm">
-              Exportar PDF
+          {isManagement ? (
+            <Link href="/recipes" className="ui-btn ui-btn--ghost ui-btn--sm">
+              Admin recetas
             </Link>
-            {isManagement ? (
-              <Link href="/recipes" className="ui-btn ui-btn--ghost ui-btn--sm">
-                Admin recetas
-              </Link>
-            ) : null}
-          </div>
+          ) : null}
         </div>
 
         <form className="mt-4 grid gap-3 lg:grid-cols-[1.2fr_1.2fr_1fr_minmax(180px,1fr)_auto_auto]">

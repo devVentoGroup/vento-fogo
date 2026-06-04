@@ -1,50 +1,37 @@
-import { randomUUID } from "crypto";
-
-import { redirect } from "next/navigation";
+import Link from "next/link";
 
 import { requireAppAccess } from "@/lib/auth/guard";
-import { RecipeBaseFields } from "@/features/recipes/recipe-base-fields";
-import {
-  RecipeIngredientsEditor,
-  type IngredientLine,
-} from "@/features/recipes/recipe-ingredients-editor";
-import {
-  RecipeStepsEditor,
-  type RecipeStepLine,
-} from "@/features/recipes/recipe-steps-editor";
-import { RecipeContextSelectors } from "@/features/recipes/recipe-context-selectors";
 
 export const dynamic = "force-dynamic";
 
 const APP_ID = "fogo";
-const NEXO_BASE_URL =
-  process.env.NEXT_PUBLIC_NEXO_URL?.replace(/\/$/, "") || "https://nexo.ventogroup.co";
-const RECIPE_STEP_PHOTOS_BUCKET = "recipe-step-photos";
-const MAX_RECIPE_STEP_PHOTO_BYTES = 8 * 1024 * 1024;
-const ALLOWED_RECIPE_STEP_PHOTO_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+const UNASSIGNED_SITE_ID = "__sin_sede__";
+const UNASSIGNED_AREA_ID = "__sin_area__";
 
-type ProductOption = {
-  id: string;
+type Relation<T> = T | T[] | null | undefined;
+
+type ProductShape = {
+  id?: string;
   name: string | null;
   sku: string | null;
   unit: string | null;
   stock_unit_code?: string | null;
-  cost: number | null;
-  product_type: string | null;
-  is_active: boolean | null;
+  image_url?: string | null;
+  catalog_image_url?: string | null;
 };
 
-type SiteOption = {
+type AreaShape = {
   id: string;
-  name: string | null;
-  site_type: string | null;
-};
-
-type AreaOption = {
-  id: string;
-  code: string | null;
+  code?: string | null;
   name: string | null;
   kind: string | null;
+  site_id?: string | null;
+};
+
+type SiteShape = {
+  id: string;
+  name: string | null;
+  site_type?: string | null;
 };
 
 type RecipeCardRow = {
@@ -60,52 +47,29 @@ type RecipeCardRow = {
   shelf_life_days: number | null;
   difficulty: string | null;
   recipe_description: string | null;
+  cover_image_path?: string | null;
   process_config: Record<string, unknown> | null;
-  status: "draft" | "published" | "archived";
+  status: "draft" | "published" | "archived" | string;
   is_active: boolean;
+  updated_at?: string | null;
+  products?: Relation<ProductShape>;
+  areas?: Relation<AreaShape>;
 };
 
-type UnitOption = {
-  code: string;
-  name: string | null;
-  family: string | null;
-  factor_to_base: number | null;
-  is_active: boolean;
+type RecipeGroup = {
+  key: string;
+  title: string;
+  recipes: RecipeCardRow[];
 };
 
-type AppSupabaseClient = Awaited<ReturnType<typeof requireAppAccess>>["supabase"];
-
-const PRODUCTION_RECIPE_AREA_KINDS = ["bodega", "cocina_caliente", "panaderia", "reposteria"];
-const PRODUCTION_RECIPE_AREA_ORDER = new Map(
-  PRODUCTION_RECIPE_AREA_KINDS.map((kind, index) => [kind, index])
-);
-const PRODUCTION_RECIPE_AREA_CODES = new Set(["BODEGA", "COC-CAL", "PAN-GALL", "REPOSTERIA"]);
-const PRODUCTION_RECIPE_AREA_SLUGS = new Set([
-  "bodega",
-  "bodega_principal",
-  "cocina_caliente",
-  "galleteria_y_panaderia",
-  "reposteria",
-]);
-
-function asText(value: FormDataEntryValue | null) {
-  return typeof value === "string" ? value.trim() : "";
+function one<T>(value: Relation<T>): T | null {
+  if (!value) return null;
+  return Array.isArray(value) ? value[0] ?? null : value;
 }
 
-function asNullableNumber(value: FormDataEntryValue | null): number | null {
-  const raw = asText(value);
-  if (!raw) return null;
-  const parsed = Number(raw);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function asPositive(value: FormDataEntryValue | null, fallback: number) {
-  const parsed = asNullableNumber(value);
-  return parsed != null && parsed > 0 ? parsed : fallback;
-}
-
-function normalizeUnitCode(value: string | null | undefined) {
-  return String(value ?? "").trim().toLowerCase();
+function fmt(value: number | null | undefined, digits = 2) {
+  if (value == null || !Number.isFinite(Number(value))) return "-";
+  return new Intl.NumberFormat("es-CO", { maximumFractionDigits: digits }).format(Number(value));
 }
 
 function normalizeSlug(value: string | null | undefined) {
@@ -118,825 +82,426 @@ function normalizeSlug(value: string | null | undefined) {
     .replace(/^_+|_+$/g, "");
 }
 
-function isStandalonePanaderiaArea(area: AreaOption) {
-  const code = String(area.code ?? "").trim().toUpperCase();
-  const slug = normalizeSlug(area.name);
-  return code === "PAN" || code === "PANADERIA" || slug === "panaderia";
+function productName(recipe: RecipeCardRow | null | undefined) {
+  return one(recipe?.products)?.name || "Receta sin nombre";
 }
 
-function isProductionRecipeArea(area: AreaOption, allowedKinds: Set<string>) {
-  const code = String(area.code ?? "").trim().toUpperCase();
-  const kind = String(area.kind ?? "").trim();
-  const slug = normalizeSlug(area.name);
-  return (
-    !isStandalonePanaderiaArea(area) &&
-    (allowedKinds.has(kind) ||
-      PRODUCTION_RECIPE_AREA_CODES.has(code) ||
-      PRODUCTION_RECIPE_AREA_SLUGS.has(slug))
-  );
+function productSku(recipe: RecipeCardRow | null | undefined) {
+  return one(recipe?.products)?.sku || "Sin SKU";
 }
 
-function sortProductionAreas(a: AreaOption, b: AreaOption) {
-  const areaOrder = (area: AreaOption) => {
-    const kindOrder = PRODUCTION_RECIPE_AREA_ORDER.get(String(area.kind ?? ""));
-    if (kindOrder != null) return kindOrder;
-    const code = String(area.code ?? "").trim().toUpperCase();
-    const slug = normalizeSlug(area.name);
-    if (code === "BODEGA" || slug === "bodega" || slug === "bodega_principal") return 0;
-    if (code === "COC-CAL" || slug === "cocina_caliente") return 1;
-    if (code === "PAN-GALL" || slug === "galleteria_y_panaderia") return 2;
-    if (code === "REPOSTERIA" || slug === "reposteria") return 3;
-    return 999;
-  };
-  const aOrder = areaOrder(a);
-  const bOrder = areaOrder(b);
-  if (aOrder !== bOrder) return aOrder - bOrder;
-  return String(a.name ?? a.code ?? "").localeCompare(String(b.name ?? b.code ?? ""), "es");
+function productImage(recipe: RecipeCardRow | null | undefined) {
+  const product = one(recipe?.products);
+  return recipe?.cover_image_path || product?.catalog_image_url || product?.image_url || "";
 }
 
-function parseJsonObject(value: string) {
-  if (!value) return null;
-  try {
-    const parsed = JSON.parse(value);
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : null;
-  } catch {
-    return null;
-  }
+function areaLabel(area: AreaShape | null | undefined) {
+  return area?.name || area?.kind || "Sin area";
 }
 
-function withQuery(path: string, key: string, value: string) {
-  return `${path}${path.includes("?") ? "&" : "?"}${key}=${encodeURIComponent(value)}`;
+function siteLabel(site: SiteShape | null | undefined) {
+  return site?.name || site?.site_type || "Sin sede";
 }
 
-function baseNewPath(siteId: string, areaId: string, productId: string, source: string) {
+function statusLabel(value: string | null | undefined) {
+  const status = String(value ?? "").trim().toLowerCase();
+  if (status === "published") return "Publicada";
+  if (status === "draft") return "Borrador";
+  if (status === "archived") return "Archivada";
+  return "Sin estado";
+}
+
+function statusClass(value: string | null | undefined) {
+  const status = String(value ?? "").trim().toLowerCase();
+  if (status === "published") return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  if (status === "archived") return "border-slate-200 bg-slate-50 text-slate-600";
+  return "border-[#FED7AA] bg-[#FFF7ED] text-[#C2410C]";
+}
+
+function difficultyLabel(value: string | null | undefined) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (!normalized) return "Simple";
+  if (normalized === "facil") return "Facil";
+  if (normalized === "medio") return "Media";
+  if (normalized === "dificil") return "Dificil";
+  return value;
+}
+
+function editRecipeHref(recipe: RecipeCardRow) {
   const qs = new URLSearchParams();
-  if (siteId) qs.set("site_id", siteId);
-  if (areaId) qs.set("area_id", areaId);
-  if (productId) qs.set("product_id", productId);
-  if (source) qs.set("source", source);
+  if (recipe.site_id) qs.set("site_id", recipe.site_id);
+  if (recipe.area_id) qs.set("area_id", recipe.area_id);
+  qs.set("product_id", recipe.product_id);
+  return `/recipes/new?${qs.toString()}`;
+}
+
+function newRecipeHref(params: { siteId?: string | null; areaId?: string | null }) {
+  const qs = new URLSearchParams();
+  if (params.siteId && params.siteId !== UNASSIGNED_SITE_ID) qs.set("site_id", params.siteId);
+  if (params.areaId && params.areaId !== UNASSIGNED_AREA_ID) qs.set("area_id", params.areaId);
   const query = qs.toString();
   return query ? `/recipes/new?${query}` : "/recipes/new";
 }
 
-function normalizeStoragePath(value: unknown) {
-  const path = String(value ?? "").trim();
-  if (!path || /^https?:\/\//i.test(path)) return null;
-  return path;
-}
-
-function addStoragePath(target: Set<string>, value: unknown) {
-  const path = normalizeStoragePath(value);
-  if (path) target.add(path);
-}
-
-function asRecipeStepImageFile(value: FormDataEntryValue | null) {
-  if (!(value instanceof File) || value.size <= 0) return null;
-  return value;
-}
-
-function recipeStepImageExtension(file: File) {
-  if (file.type === "image/png") return "png";
-  if (file.type === "image/webp") return "webp";
-  return "jpg";
-}
-
-async function uploadRecipeStepPhoto({
-  supabase,
-  recipeCardId,
-  stepNumber,
-  file,
-  returnBase,
-}: {
-  supabase: AppSupabaseClient;
-  recipeCardId: string;
-  stepNumber: number;
-  file: File;
-  returnBase: string;
+function recipesHref(params: {
+  siteId?: string | null;
+  areaId?: string | null;
+  status?: string | null;
+  q?: string | null;
 }) {
-  if (!ALLOWED_RECIPE_STEP_PHOTO_TYPES.has(file.type)) {
-    redirect(
-      withQuery(
-        returnBase,
-        "error",
-        "La foto del paso debe ser JPG, PNG o WEBP."
-      )
-    );
-  }
-
-  if (file.size > MAX_RECIPE_STEP_PHOTO_BYTES) {
-    redirect(
-      withQuery(
-        returnBase,
-        "error",
-        "La foto del paso no puede superar 8 MB."
-      )
-    );
-  }
-
-  const extension = recipeStepImageExtension(file);
-  const path = `${recipeCardId}/step-${stepNumber}-${randomUUID()}.${extension}`;
-
-  const { error } = await supabase.storage
-    .from(RECIPE_STEP_PHOTOS_BUCKET)
-    .upload(path, file, {
-      contentType: file.type,
-      upsert: false,
-    });
-
-  if (error) {
-    redirect(withQuery(returnBase, "error", `No se pudo subir la foto del paso: ${error.message}`));
-  }
-
-  return path;
-}
-
-async function removeRecipeStepPhotos(supabase: AppSupabaseClient, paths: Iterable<string>) {
-  const uniquePaths = Array.from(new Set(Array.from(paths).map(normalizeStoragePath).filter(Boolean))) as string[];
-  if (uniquePaths.length === 0) return;
-
-  const { error } = await supabase.storage
-    .from(RECIPE_STEP_PHOTOS_BUCKET)
-    .remove(uniquePaths);
-
-  if (error) {
-    console.error("No se pudieron borrar fotos antiguas de pasos de receta", error.message);
-  }
-}
-
-async function saveRecipe(formData: FormData) {
-  "use server";
-
-  const siteId = asText(formData.get("site_id"));
-  const areaId = asText(formData.get("area_id"));
-  const source = asText(formData.get("source"));
-  const productId = asText(formData.get("product_id"));
-  const returnBase = baseNewPath(siteId, areaId, productId, source);
-
-  const { supabase } = await requireAppAccess({
-    appId: APP_ID,
-    returnTo: returnBase,
-    permissionCode: "production.recipes.manage",
-  });
-
-  if (!productId) {
-    redirect(withQuery(returnBase, "error", "Selecciona un producto para guardar la receta."));
-  }
-
-  const { data: product } = await supabase
-    .from("products")
-    .select("id,name,sku,unit,stock_unit_code,product_type,is_active")
-    .eq("id", productId)
-    .maybeSingle();
-  const productRow = (product as ProductOption | null) ?? null;
-
-  if (!productRow || !productRow.is_active) {
-    redirect(withQuery(returnBase, "error", "El producto seleccionado no esta activo."));
-  }
-
-  const productType = String(productRow.product_type ?? "").trim().toLowerCase();
-  if (!["preparacion", "venta"].includes(productType)) {
-    redirect(withQuery(returnBase, "error", "Solo se permiten productos tipo preparacion o venta."));
-  }
-
-  const ingredientRaw = asText(formData.get("ingredient_lines"));
-  let ingredientLines: IngredientLine[] = [];
-  if (ingredientRaw) {
-    try {
-      ingredientLines = JSON.parse(ingredientRaw) as IngredientLine[];
-    } catch {
-      redirect(withQuery(returnBase, "error", "Formato invalido en ingredientes."));
-    }
-  }
-
-  const normalizedIngredients = ingredientLines
-    .filter((line) => !line._delete)
-    .map((line) => ({
-      ingredient_product_id: String(line.ingredient_product_id || "").trim(),
-      quantity: Number(line.quantity ?? 0),
-    }))
-    .filter((line) => line.ingredient_product_id && Number.isFinite(line.quantity) && line.quantity > 0);
-
-  const stepsRaw = asText(formData.get("recipe_steps"));
-  let steps: RecipeStepLine[] = [];
-  if (stepsRaw) {
-    try {
-      steps = JSON.parse(stepsRaw) as RecipeStepLine[];
-    } catch {
-      redirect(withQuery(returnBase, "error", "Formato invalido en pasos."));
-    }
-  }
-
-  const deletedStepImagePaths = steps
-    .filter((step) => step._delete)
-    .map((step) => normalizeStoragePath(step.step_image_path ?? step.step_image_url))
-    .filter((path): path is string => Boolean(path));
-
-  const normalizedStepDraft = steps
-    .filter((step) => !step._delete)
-    .map((step) => {
-      const existingImagePath = normalizeStoragePath(step.step_image_path ?? step.step_image_url);
-
-      return {
-        id: String(step.id ?? "").trim() || null,
-        client_key:
-          String(step.client_key ?? "").trim() ||
-          String(step.id ?? "").trim() ||
-          String(step.step_number ?? "").trim(),
-        description: String(step.description ?? "").trim(),
-        tip: String(step.tip ?? "").trim() || null,
-        time_minutes:
-          Number.isFinite(Number(step.time_minutes)) && Number(step.time_minutes) >= 0
-            ? Number(step.time_minutes)
-            : null,
-        existing_image_path: existingImagePath,
-        remove_image: step.remove_image === true,
-        original_order:
-          Number.isFinite(Number(step.step_number)) && Number(step.step_number) > 0
-            ? Number(step.step_number)
-            : 9999,
-      };
-    })
-    .filter((step) => step.description.length > 0)
-    .sort((a, b) => a.original_order - b.original_order);
-
-  const statusRaw = (asText(formData.get("status")) || "draft").toLowerCase();
-  const status: "draft" | "published" | "archived" =
-    statusRaw === "published" || statusRaw === "archived" ? statusRaw : "draft";
-  const yieldQty = asPositive(formData.get("yield_qty"), 1);
-  const yieldUnit = asText(formData.get("yield_unit")) || productRow.unit || "un";
-  const portionSize = asNullableNumber(formData.get("portion_size"));
-  const portionUnit = asText(formData.get("portion_unit")) || null;
-
-  if (status === "published") {
-    if (!siteId || !areaId) {
-      redirect(withQuery(returnBase, "error", "Para publicar debes seleccionar sede y area productiva."));
-    }
-    if (!yieldQty || yieldQty <= 0 || !yieldUnit) {
-      redirect(withQuery(returnBase, "error", "Para publicar debes completar rendimiento y unidad."));
-    }
-    if (!portionSize || portionSize <= 0 || !portionUnit) {
-      redirect(withQuery(returnBase, "error", "Para publicar debes completar porcion y unidad de porcion."));
-    }
-    if (normalizedIngredients.length <= 0) {
-      redirect(withQuery(returnBase, "error", "Para publicar debes tener al menos 1 ingrediente activo en BOM."));
-    }
-    if (normalizedStepDraft.length <= 0) {
-      redirect(withQuery(returnBase, "error", "Para publicar debes tener al menos 1 paso de preparacion."));
-    }
-  }
-
-  if (areaId) {
-    const { data: validAreas } = siteId
-      ? await supabase.rpc("fogo_recipe_area_options", { p_site_id: siteId })
-      : { data: [] as AreaOption[] };
-    const area = ((validAreas ?? []) as AreaOption[]).find((option) => option.id === areaId) ?? null;
-    if (!area) {
-      redirect(withQuery(returnBase, "error", "Selecciona un area productiva valida para el recetario."));
-    }
-  }
-
-  const recipePayload: Record<string, unknown> = {
-    product_id: productId,
-    yield_qty: yieldQty,
-    yield_unit: yieldUnit,
-    portion_size: portionSize,
-    portion_unit: portionUnit,
-    prep_time_minutes: asNullableNumber(formData.get("prep_time_minutes")),
-    shelf_life_days: asNullableNumber(formData.get("shelf_life_days")),
-    difficulty: asText(formData.get("difficulty")) || null,
-    recipe_description: asText(formData.get("recipe_description")) || null,
-    process_config: parseJsonObject(asText(formData.get("process_config"))) ?? {},
-    status,
-    is_active: asText(formData.get("is_active")) === "1",
-  };
-  if (siteId) recipePayload.site_id = siteId;
-  recipePayload.area_id = areaId || null;
-
-  const { data: existingCard } = await supabase
-    .from("recipe_cards")
-    .select("id")
-    .eq("product_id", productId)
-    .maybeSingle();
-
-  let recipeCardId = String(existingCard?.id ?? "");
-  if (!recipeCardId) {
-    const { data: inserted, error: insertErr } = await supabase
-      .from("recipe_cards")
-      .insert(recipePayload)
-      .select("id")
-      .single();
-    if (insertErr || !inserted?.id) {
-      redirect(withQuery(returnBase, "error", insertErr?.message || "No se pudo crear la receta."));
-    }
-    recipeCardId = String(inserted.id);
-  } else {
-    const { error: updateErr } = await supabase
-      .from("recipe_cards")
-      .update(recipePayload)
-      .eq("id", recipeCardId);
-    if (updateErr) {
-      redirect(withQuery(returnBase, "error", updateErr.message));
-    }
-  }
-
-  const { error: deleteIngredientsErr } = await supabase
-    .from("recipes")
-    .delete()
-    .eq("product_id", productId);
-  if (deleteIngredientsErr) {
-    redirect(withQuery(returnBase, "error", deleteIngredientsErr.message));
-  }
-
-  if (normalizedIngredients.length > 0) {
-    const { error: insertIngredientsErr } = await supabase.from("recipes").insert(
-      normalizedIngredients.map((line) => ({
-        product_id: productId,
-        ingredient_product_id: line.ingredient_product_id,
-        quantity: line.quantity,
-        is_active: true,
-      }))
-    );
-    if (insertIngredientsErr) {
-      redirect(withQuery(returnBase, "error", insertIngredientsErr.message));
-    }
-  }
-
-  // Auto-costo receta: suma ingredientes / rendimiento expresado en unidad base del producto.
-  // Aplica aunque el modo en NEXO sea manual para preparaciones/venta.
-  if (normalizedIngredients.length > 0) {
-    const ingredientIds = Array.from(
-      new Set(normalizedIngredients.map((line) => line.ingredient_product_id))
-    );
-    const { data: ingredientProducts } = await supabase
-      .from("products")
-      .select("id,cost")
-      .in("id", ingredientIds);
-
-    const ingredientCostMap = new Map<string, number>();
-    for (const row of (ingredientProducts ?? []) as Array<{ id: string; cost: number | null }>) {
-      ingredientCostMap.set(row.id, Number(row.cost ?? 0));
-    }
-
-    const totalIngredientCost = normalizedIngredients.reduce((acc, line) => {
-      const unitCost = ingredientCostMap.get(line.ingredient_product_id) ?? 0;
-      return acc + unitCost * Number(line.quantity);
-    }, 0);
-
-    const yieldQtyRaw = Number(recipePayload.yield_qty ?? 0);
-    const yieldUnitCode = normalizeUnitCode(String(recipePayload.yield_unit ?? ""));
-    const stockUnitCode = normalizeUnitCode(
-      String(productRow.stock_unit_code ?? productRow.unit ?? "")
-    );
-
-    let yieldQtyInStockUnit = yieldQtyRaw;
-    if (
-      yieldQtyRaw > 0 &&
-      yieldUnitCode &&
-      stockUnitCode &&
-      yieldUnitCode !== stockUnitCode
-    ) {
-      const { data: unitsData } = await supabase
-        .from("inventory_units")
-        .select("code,family,factor_to_base")
-        .in("code", [yieldUnitCode, stockUnitCode]);
-      const unitMap = new Map(
-        ((unitsData ?? []) as Array<{ code: string; family: string | null; factor_to_base: number | null }>).map(
-          (row) => [normalizeUnitCode(row.code), row]
-        )
-      );
-      const fromUnit = unitMap.get(yieldUnitCode);
-      const toUnit = unitMap.get(stockUnitCode);
-      if (
-        fromUnit &&
-        toUnit &&
-        fromUnit.family &&
-        toUnit.family &&
-        fromUnit.family === toUnit.family &&
-        Number(fromUnit.factor_to_base) > 0 &&
-        Number(toUnit.factor_to_base) > 0
-      ) {
-        yieldQtyInStockUnit =
-          yieldQtyRaw *
-          (Number(fromUnit.factor_to_base) / Number(toUnit.factor_to_base));
-      }
-    }
-
-    if (yieldQtyInStockUnit > 0 && Number.isFinite(totalIngredientCost) && totalIngredientCost >= 0) {
-      const recipeUnitCost = totalIngredientCost / yieldQtyInStockUnit;
-      await supabase
-        .from("products")
-        .update({
-          cost: Number(recipeUnitCost.toFixed(6)),
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", productId);
-    }
-  }
-
-  const { data: existingStepPhotoRows } = await supabase
-    .from("recipe_steps")
-    .select("id,image_path")
-    .eq("recipe_card_id", recipeCardId);
-
-  const existingImagePathByStepId = new Map(
-    ((existingStepPhotoRows ?? []) as Array<{ id: string; image_path: string | null }>)
-      .map((row) => [row.id, normalizeStoragePath(row.image_path)])
-  );
-
-  const uploadedStepImagePaths: string[] = [];
-  const stepImagePathsToDelete = new Set<string>();
-  for (const path of deletedStepImagePaths) {
-    addStoragePath(stepImagePathsToDelete, path);
-  }
-
-  const normalizedSteps: Array<{
-    recipe_card_id: string;
-    step_number: number;
-    description: string;
-    tip: string | null;
-    time_minutes: number | null;
-    image_path: string | null;
-  }> = [];
-  for (const [index, step] of normalizedStepDraft.entries()) {
-    const stepNumber = index + 1;
-    const existingImagePath =
-      step.existing_image_path ||
-      (step.id ? existingImagePathByStepId.get(step.id) ?? null : null);
-
-    const uploadedFile = asRecipeStepImageFile(
-      formData.get(`recipe_step_image_${step.client_key}`)
-    );
-
-    let imagePath = existingImagePath;
-    if (uploadedFile) {
-      imagePath = await uploadRecipeStepPhoto({
-        supabase,
-        recipeCardId,
-        stepNumber,
-        file: uploadedFile,
-        returnBase,
-      });
-      uploadedStepImagePaths.push(imagePath);
-      addStoragePath(stepImagePathsToDelete, existingImagePath);
-    } else if (step.remove_image) {
-      addStoragePath(stepImagePathsToDelete, existingImagePath);
-      imagePath = null;
-    }
-
-    normalizedSteps.push({
-      recipe_card_id: recipeCardId,
-      step_number: stepNumber,
-      description: step.description,
-      tip: step.tip,
-      time_minutes: step.time_minutes,
-      image_path: imagePath,
-    });
-  }
-
-  const keptStepImagePaths = new Set(
-    normalizedSteps
-      .map((step) => normalizeStoragePath(step.image_path))
-      .filter((path): path is string => Boolean(path))
-  );
-  for (const path of existingImagePathByStepId.values()) {
-    if (path && !keptStepImagePaths.has(path)) {
-      addStoragePath(stepImagePathsToDelete, path);
-    }
-  }
-
-  const { error: deleteStepsErr } = await supabase
-    .from("recipe_steps")
-    .delete()
-    .eq("recipe_card_id", recipeCardId);
-  if (deleteStepsErr) {
-    await removeRecipeStepPhotos(supabase, uploadedStepImagePaths);
-    redirect(withQuery(returnBase, "error", deleteStepsErr.message));
-  }
-
-  if (normalizedSteps.length > 0) {
-    const { error: insertStepsErr } = await supabase
-      .from("recipe_steps")
-      .insert(normalizedSteps);
-    if (insertStepsErr) {
-      await removeRecipeStepPhotos(supabase, uploadedStepImagePaths);
-      redirect(withQuery(returnBase, "error", insertStepsErr.message));
-    }
-  }
-
-  await removeRecipeStepPhotos(supabase, stepImagePathsToDelete);
-
   const qs = new URLSearchParams();
-  qs.set("saved", "1");
-  if (source === "nexo") {
-    qs.set("product_id", productId);
-    qs.set("source", source);
-  }
-  redirect(`/recipes?${qs.toString()}`);
+  if (params.siteId) qs.set("site_id", params.siteId);
+  if (params.areaId) qs.set("area_id", params.areaId);
+  if (params.status && params.status !== "all") qs.set("status", params.status);
+  if (params.q) qs.set("q", params.q);
+  const query = qs.toString();
+  return query ? `/recipes?${query}` : "/recipes";
 }
 
-export default async function NewRecipePage({
+export default async function RecipesAdminPage({
   searchParams,
 }: {
   searchParams?: Promise<{
     site_id?: string;
     area_id?: string;
-    product_id?: string;
-    source?: string;
+    status?: string;
+    q?: string;
+    saved?: string;
     error?: string;
   }>;
 }) {
   const sp = (await searchParams) ?? {};
   const requestedSiteId = String(sp.site_id ?? "").trim();
   const requestedAreaId = String(sp.area_id ?? "").trim();
-  const requestedProductId = String(sp.product_id ?? "").trim();
-  const source = String(sp.source ?? "").trim().toLowerCase();
+  const requestedStatus = String(sp.status ?? "all").trim().toLowerCase();
+  const searchTerm = String(sp.q ?? "").trim();
+  const saved = String(sp.saved ?? "").trim() === "1";
   const error = String(sp.error ?? "").trim();
+  const searchNeedle = searchTerm.toLowerCase();
 
-  const { supabase, user } = await requireAppAccess({
+  const { supabase } = await requireAppAccess({
     appId: APP_ID,
-    returnTo: baseNewPath(requestedSiteId, requestedAreaId, requestedProductId, source),
+    returnTo: recipesHref({
+      siteId: requestedSiteId,
+      areaId: requestedAreaId,
+      status: requestedStatus,
+      q: searchTerm,
+    }),
     permissionCode: "production.recipes.manage",
   });
 
-  const [{ data: employeeSitesRows }, { data: employeeRow }] = await Promise.all([
+  const [{ data: recipeRowsData }, { data: siteRowsData }] = await Promise.all([
     supabase
-      .from("employee_sites")
-      .select("site_id,is_primary")
-      .eq("employee_id", user.id)
-      .eq("is_active", true)
-      .order("is_primary", { ascending: false })
-      .limit(50),
+      .from("recipe_cards")
+      .select(
+        "id,product_id,site_id,area_id,yield_qty,yield_unit,portion_size,portion_unit,prep_time_minutes,shelf_life_days,difficulty,recipe_description,cover_image_path,process_config,status,is_active,updated_at,products(id,name,sku,unit,stock_unit_code,image_url,catalog_image_url),areas(id,code,name,kind,site_id)"
+      )
+      .order("updated_at", { ascending: false })
+      .limit(1200),
     supabase
-      .from("employees")
-      .select("site_id")
-      .eq("id", user.id)
-      .maybeSingle(),
+      .from("sites")
+      .select("id,name,site_type")
+      .order("name", { ascending: true })
+      .limit(200),
   ]);
 
-  const employeeSiteIds = ((employeeSitesRows ?? []) as Array<{ site_id: string | null }>)
-    .map((row) => row.site_id)
-    .filter((value): value is string => Boolean(value));
+  const recipeRows = (recipeRowsData ?? []) as RecipeCardRow[];
+  const siteRows = (siteRowsData ?? []) as SiteShape[];
+  const siteMap = new Map(siteRows.map((site) => [site.id, site]));
 
-  const { data: sitesData } = employeeSiteIds.length
-    ? await supabase
-        .from("sites")
-        .select("id,name,site_type")
-        .in("id", employeeSiteIds)
-        .order("name", { ascending: true })
-    : { data: [] as SiteOption[] };
-
-  const sites = (sitesData ?? []) as SiteOption[];
-  const resolvedSiteId =
-    requestedSiteId ||
-    employeeSiteIds[0] ||
-    String(employeeRow?.site_id ?? "").trim();
-
-  const [
-    { data: recipeCardsData },
-    { data: productRows },
-    { data: ingredientRows },
-    { data: unitsData },
-  ] =
-    await Promise.all([
-      supabase
-        .from("recipe_cards")
-        .select(
-          "id,product_id,site_id,area_id,yield_qty,yield_unit,portion_size,portion_unit,prep_time_minutes,shelf_life_days,difficulty,recipe_description,process_config,status,is_active"
-        )
-        .order("updated_at", { ascending: false })
-        .limit(600),
-      supabase
-        .from("products")
-        .select("id,name,sku,unit,stock_unit_code,cost,product_type,is_active")
-        .in("product_type", ["preparacion", "venta"])
-        .eq("is_active", true)
-        .order("name", { ascending: true })
-        .limit(800),
-      supabase
-        .from("products")
-        .select("id,name,sku,unit,stock_unit_code,cost,product_type,is_active")
-        .in("product_type", ["insumo", "preparacion"])
-        .eq("is_active", true)
-        .order("name", { ascending: true })
-        .limit(1200),
-      supabase
-        .from("inventory_units")
-        .select("code,name,family,factor_to_base,is_active")
-        .eq("is_active", true)
-        .order("family", { ascending: true })
-        .order("factor_to_base", { ascending: true }),
-    ]);
-
-  const recipeCards = (recipeCardsData ?? []) as RecipeCardRow[];
-  const products = (productRows ?? []) as ProductOption[];
-  const ingredientOptions = (ingredientRows ?? []) as ProductOption[];
-  const units = (unitsData ?? []) as UnitOption[];
-
-  const selectedProductId =
-    requestedProductId ||
-    (products.length ? products[0].id : "");
-  const selectedProduct = products.find((row) => row.id === selectedProductId) ?? null;
-
-  const selectedRecipeCard =
-    recipeCards.find((row) => row.product_id === selectedProductId) ?? null;
-
-  const [{ data: existingIngredientRows }, { data: existingStepsRows }] = await Promise.all([
-    selectedProductId
-      ? supabase
-          .from("recipes")
-          .select("id,ingredient_product_id,quantity")
-          .eq("product_id", selectedProductId)
-          .eq("is_active", true)
-      : Promise.resolve({ data: [] as Array<{ id: string; ingredient_product_id: string; quantity: number }> }),
-    selectedRecipeCard?.id
-      ? supabase
-          .from("recipe_steps")
-          .select("id,step_number,description,tip,time_minutes,image_path")
-          .eq("recipe_card_id", selectedRecipeCard.id)
-          .order("step_number", { ascending: true })
-      : Promise.resolve({
-          data: [] as Array<{
-            id: string;
-            step_number: number;
-            description: string;
-            tip: string | null;
-            time_minutes: number | null;
-            image_path: string | null;
-          }>,
-        }),
-  ]);
-
-  const initialIngredientLines: IngredientLine[] = (
-    (existingIngredientRows ?? []) as Array<{
-      id: string;
-      ingredient_product_id: string;
-      quantity: number;
-    }>
-  ).map((row) => ({
-    id: row.id,
-    ingredient_product_id: row.ingredient_product_id,
-    quantity: Number(row.quantity),
-  }));
-
-  const initialSteps: RecipeStepLine[] = (
-    (existingStepsRows ?? []) as Array<{
-      id: string;
-      step_number: number;
-      description: string;
-      tip: string | null;
-      time_minutes: number | null;
-      image_path: string | null;
-    }>
-  ).map((row) => ({
-    id: row.id,
-    step_number: Number(row.step_number),
-    description: row.description ?? "",
-    tip: row.tip ?? "",
-    time_minutes: row.time_minutes ?? undefined,
-    step_image_path: row.image_path ?? "",
-    step_image_url: row.image_path ?? "",
-  }));
-
-  const defaultYieldUnit = selectedRecipeCard?.yield_unit || selectedProduct?.unit || "un";
-  const formSiteId = requestedSiteId || selectedRecipeCard?.site_id || resolvedSiteId;
-
-  let recipeAreasData: AreaOption[] = [];
-  if (formSiteId) {
-    const { data: rpcAreasData } = await supabase.rpc("fogo_recipe_area_options", {
-      p_site_id: formSiteId,
-    });
-    recipeAreasData = (rpcAreasData ?? []) as AreaOption[];
-    if (recipeAreasData.length === 0) {
-      const { data: fallbackAreasData } = await supabase
-        .from("areas")
-        .select("id,code,name,kind")
-        .eq("site_id", formSiteId)
-        .eq("is_active", true);
-      recipeAreasData = (fallbackAreasData ?? []) as AreaOption[];
-    }
+  const areaMap = new Map<string, AreaShape>();
+  for (const recipe of recipeRows) {
+    const area = one(recipe.areas);
+    if (area?.id && !areaMap.has(area.id)) areaMap.set(area.id, area);
   }
-  const allowedAreaKinds = new Set(PRODUCTION_RECIPE_AREA_KINDS);
-  const areas = recipeAreasData
-    .filter((area) => isProductionRecipeArea(area, allowedAreaKinds))
-    .sort(sortProductionAreas);
 
-  const formAreaId =
-    (requestedAreaId && areas.some((area) => area.id === requestedAreaId) ? requestedAreaId : "") ||
-    (selectedRecipeCard?.area_id && areas.some((area) => area.id === selectedRecipeCard.area_id)
-      ? selectedRecipeCard.area_id
-      : "");
+  const siteOptions = Array.from(
+    new Map(
+      recipeRows
+        .map((recipe) => {
+          if (!recipe.site_id) return null;
+          const site = siteMap.get(recipe.site_id) ?? {
+            id: recipe.site_id,
+            name: "Sede",
+            site_type: null,
+          };
+          return [site.id, site] as const;
+        })
+        .filter((value): value is readonly [string, SiteShape] => Boolean(value))
+    ).values()
+  ).sort((a, b) => siteLabel(a).localeCompare(siteLabel(b), "es"));
+
+  const areaOptions = Array.from(areaMap.values()).sort((a, b) =>
+    areaLabel(a).localeCompare(areaLabel(b), "es")
+  );
+
+  const selectedStatus = ["published", "draft", "archived"].includes(requestedStatus)
+    ? requestedStatus
+    : "all";
+
+  const recipes = recipeRows
+    .filter((recipe) => {
+      if (requestedSiteId === UNASSIGNED_SITE_ID && recipe.site_id) return false;
+      if (requestedSiteId && requestedSiteId !== UNASSIGNED_SITE_ID && recipe.site_id !== requestedSiteId) return false;
+
+      if (requestedAreaId === UNASSIGNED_AREA_ID && recipe.area_id) return false;
+      if (requestedAreaId && requestedAreaId !== UNASSIGNED_AREA_ID && recipe.area_id !== requestedAreaId) return false;
+
+      if (selectedStatus !== "all" && String(recipe.status ?? "").toLowerCase() !== selectedStatus) return false;
+
+      if (!searchNeedle) return true;
+      const product = one(recipe.products);
+      const area = one(recipe.areas);
+      const site = recipe.site_id ? siteMap.get(recipe.site_id) : null;
+      const haystack = [
+        product?.name,
+        product?.sku,
+        areaLabel(area),
+        siteLabel(site),
+        statusLabel(recipe.status),
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(searchNeedle);
+    })
+    .sort((a, b) => {
+      const aArea = areaLabel(one(a.areas));
+      const bArea = areaLabel(one(b.areas));
+      const areaCompare = aArea.localeCompare(bArea, "es");
+      if (areaCompare !== 0) return areaCompare;
+      return productName(a).localeCompare(productName(b), "es");
+    });
+
+  const recipeGroups = Array.from(
+    recipes
+      .reduce((map, recipe) => {
+        const area = one(recipe.areas);
+        const site = recipe.site_id ? siteMap.get(recipe.site_id) : null;
+        const title = `${siteLabel(site)} · ${areaLabel(area)}`;
+        const key = `${recipe.site_id || "sin_sede"}::${recipe.area_id || "sin_area"}`;
+        const group = map.get(key) ?? { key, title, recipes: [] as RecipeCardRow[] };
+        group.recipes.push(recipe);
+        map.set(key, group);
+        return map;
+      }, new Map<string, RecipeGroup>())
+      .values()
+  );
+
+  const statusCounts = recipeRows.reduce(
+    (acc, recipe) => {
+      const status = String(recipe.status ?? "").toLowerCase();
+      if (status === "published") acc.published += 1;
+      else if (status === "archived") acc.archived += 1;
+      else acc.draft += 1;
+      return acc;
+    },
+    { published: 0, draft: 0, archived: 0 }
+  );
 
   return (
-    <div className="space-y-6">
-      <section className="ui-panel ui-panel--halo">
-        <h1 className="ui-h1">{selectedRecipeCard ? "Editar receta" : "Nueva receta"}</h1>
-        <p className="mt-2 ui-body-muted">
-          Define ficha de receta, ingredientes (BOM) y pasos operativos en un solo flujo.
-        </p>
-        {source === "nexo" ? (
-          <div className="mt-3 ui-alert ui-alert--neutral">
-            Llegaste desde NEXO. Termina la receta aqui y quedara disponible para produccion en FOGO.
+    <div className="space-y-5">
+      <section className="rounded-[var(--ui-radius-card)] border border-[#FED7AA] bg-[linear-gradient(135deg,#FFF7ED_0%,#FFFFFF_58%,#FFFBF5_100%)] p-5 shadow-[var(--ui-shadow-soft)] md:p-6">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <span className="inline-flex rounded-full bg-white px-3 py-1 text-xs font-semibold uppercase text-[#C2410C] shadow-sm">
+              Administracion FOGO
+            </span>
+            <h1 className="mt-3 text-3xl font-semibold leading-tight text-[var(--ui-text)] md:text-5xl">
+              Recetas
+            </h1>
+            <p className="mt-2 max-w-3xl text-base leading-7 text-[var(--ui-muted)]">
+              Gestiona fichas tecnicas, ingredientes, pasos operativos, rendimiento y estado de publicacion.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <Link href="/recipe-book" className="ui-btn ui-btn--ghost ui-btn--sm">
+              Ver libro operacional
+            </Link>
+            <Link href={newRecipeHref({ siteId: requestedSiteId, areaId: requestedAreaId })} className="ui-btn ui-btn--brand ui-btn--sm">
+              Nueva receta
+            </Link>
+          </div>
+        </div>
+
+        {saved ? (
+          <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">
+            Receta guardada correctamente.
           </div>
         ) : null}
-        {error ? <div className="mt-3 ui-alert ui-alert--warn">{error}</div> : null}
+        {error ? (
+          <div className="mt-4 rounded-2xl border border-[#FED7AA] bg-[#FFF7ED] px-4 py-3 text-sm font-semibold text-[#C2410C]">
+            {error}
+          </div>
+        ) : null}
       </section>
 
-      <form action={saveRecipe} className="space-y-6" encType="multipart/form-data">
-        <section className="ui-panel space-y-5">
-          <div className="grid gap-4 md:grid-cols-2">
-            <input type="hidden" name="source" value={source || "fogo"} />
-            <RecipeContextSelectors
-              initialSiteId={formSiteId}
-              initialAreaId={formAreaId}
-              initialProductId={selectedProductId}
-              source={source || "fogo"}
-              sites={sites.map((site) => ({ id: site.id, name: site.name }))}
-              areas={areas.map((area) => ({ id: area.id, name: area.name, kind: area.kind }))}
-              products={products.map((product) => ({
-                id: product.id,
-                name: product.name,
-                sku: product.sku,
-                product_type: product.product_type,
-              }))}
-              recipeCards={recipeCards.map((card) => ({ product_id: card.product_id }))}
-            />
-
-            <label className="flex flex-col gap-1">
-              <span className="ui-label">Estado</span>
-              <select name="status" defaultValue={selectedRecipeCard?.status ?? "draft"} className="ui-input">
-                <option value="draft">Borrador</option>
-                <option value="published">Publicada</option>
-                <option value="archived">Archivada</option>
-              </select>
-              <span className="text-xs text-[var(--ui-muted)]">
-                Para publicar: rendimiento + porcion completos, minimo 1 ingrediente y 1 paso.
-              </span>
-            </label>
-
-            <label className="flex items-center gap-2 pt-8">
-              <input
-                type="checkbox"
-                name="is_active"
-                value="1"
-                defaultChecked={selectedRecipeCard?.is_active ?? true}
-              />
-              <span className="ui-label">Receta activa</span>
-            </label>
+      <section className="rounded-[var(--ui-radius-card)] border border-[var(--ui-border)] bg-white p-4 shadow-[var(--ui-shadow-soft)]">
+        <div className="grid gap-3 md:grid-cols-4">
+          <div className="rounded-3xl border border-[#FED7AA] bg-[#FFF7ED] p-4">
+            <div className="text-xs font-semibold uppercase text-[#C2410C]">Total</div>
+            <div className="mt-1 text-3xl font-semibold text-[var(--ui-text)]">{recipeRows.length}</div>
           </div>
-        </section>
+          <div className="rounded-3xl border border-emerald-200 bg-emerald-50 p-4">
+            <div className="text-xs font-semibold uppercase text-emerald-700">Publicadas</div>
+            <div className="mt-1 text-3xl font-semibold text-[var(--ui-text)]">{statusCounts.published}</div>
+          </div>
+          <div className="rounded-3xl border border-[#FED7AA] bg-[#FFFBF5] p-4">
+            <div className="text-xs font-semibold uppercase text-[#C2410C]">Borradores</div>
+            <div className="mt-1 text-3xl font-semibold text-[var(--ui-text)]">{statusCounts.draft}</div>
+          </div>
+          <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+            <div className="text-xs font-semibold uppercase text-slate-600">Archivadas</div>
+            <div className="mt-1 text-3xl font-semibold text-[var(--ui-text)]">{statusCounts.archived}</div>
+          </div>
+        </div>
 
-        <RecipeBaseFields
-          key={`base-${selectedProductId}-${selectedRecipeCard?.id ?? "new"}`}
-          initialYieldQty={selectedRecipeCard?.yield_qty ?? 1}
-          initialYieldUnit={defaultYieldUnit}
-          initialPortionSize={selectedRecipeCard?.portion_size ?? null}
-          initialPortionUnit={selectedRecipeCard?.portion_unit ?? null}
-          initialPrepTimeMinutes={selectedRecipeCard?.prep_time_minutes ?? null}
-          initialShelfLifeDays={selectedRecipeCard?.shelf_life_days ?? null}
-          initialDifficulty={selectedRecipeCard?.difficulty ?? null}
-          initialDescription={selectedRecipeCard?.recipe_description ?? null}
-          initialProcessConfig={selectedRecipeCard?.process_config ?? null}
-          units={units}
-          nexoCatalogUrl={
-            selectedProductId
-              ? `${NEXO_BASE_URL}/inventory/catalog/${encodeURIComponent(selectedProductId)}`
-              : `${NEXO_BASE_URL}/inventory/catalog`
-          }
-        />
+        <form className="mt-4 grid gap-3 lg:grid-cols-[1fr_1fr_1fr_minmax(180px,1fr)_auto_auto]">
+          <label>
+            <span className="ui-label">Sede</span>
+            <select name="site_id" defaultValue={requestedSiteId} className="ui-input mt-1 bg-white">
+              <option value="">Todas las sedes</option>
+              <option value={UNASSIGNED_SITE_ID}>Sin sede</option>
+              {siteOptions.map((site) => (
+                <option key={site.id} value={site.id}>
+                  {siteLabel(site)}
+                </option>
+              ))}
+            </select>
+          </label>
 
-        <section className="ui-panel space-y-4">
-          <h2 className="ui-h2">Ingredientes (BOM)</h2>
-          <RecipeIngredientsEditor
-            key={`bom-${selectedProductId}-${selectedRecipeCard?.id ?? "new"}`}
-            initialRows={initialIngredientLines}
-            products={ingredientOptions}
-          />
-        </section>
+          <label>
+            <span className="ui-label">Area</span>
+            <select name="area_id" defaultValue={requestedAreaId} className="ui-input mt-1 bg-white">
+              <option value="">Todas las areas</option>
+              <option value={UNASSIGNED_AREA_ID}>Sin area</option>
+              {areaOptions.map((area) => (
+                <option key={area.id} value={area.id}>
+                  {areaLabel(area)}
+                </option>
+              ))}
+            </select>
+          </label>
 
-        <section className="ui-panel space-y-4">
-          <h2 className="ui-h2">Pasos de preparacion</h2>
-          <RecipeStepsEditor
-            key={`steps-${selectedProductId}-${selectedRecipeCard?.id ?? "new"}`}
-            initialRows={initialSteps}
-          />
-        </section>
+          <label>
+            <span className="ui-label">Estado</span>
+            <select name="status" defaultValue={selectedStatus} className="ui-input mt-1 bg-white">
+              <option value="all">Todas</option>
+              <option value="published">Publicadas</option>
+              <option value="draft">Borradores</option>
+              <option value="archived">Archivadas</option>
+            </select>
+          </label>
 
-        <section className="ui-mobile-sticky-footer">
-          <div className="ui-panel flex flex-wrap items-center justify-end gap-2">
-            <a
-              href={resolvedSiteId ? `/recipes?site_id=${encodeURIComponent(resolvedSiteId)}` : "/recipes"}
-              className="ui-btn ui-btn--ghost"
-            >
-              Cancelar
-            </a>
-            <button type="submit" className="ui-btn ui-btn--brand">
-              Guardar receta
+          <label>
+            <span className="ui-label">Buscar</span>
+            <input className="ui-input mt-1 bg-white" name="q" placeholder="Nombre, SKU, sede, area..." defaultValue={searchTerm} />
+          </label>
+
+          <div className="flex items-end">
+            <button type="submit" className="ui-btn ui-btn--brand ui-btn--sm w-full">
+              Aplicar
             </button>
           </div>
+          <div className="flex items-end">
+            <Link href="/recipes" className="ui-btn ui-btn--ghost ui-btn--sm w-full">
+              Limpiar
+            </Link>
+          </div>
+        </form>
+      </section>
+
+      {recipes.length === 0 ? (
+        <section className="rounded-[var(--ui-radius-card)] border border-[#FED7AA] bg-[#FFF7ED] p-8 text-center shadow-[var(--ui-shadow-soft)]">
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl bg-white text-3xl text-[#F97316]">✦</div>
+          <h2 className="mt-4 text-2xl font-semibold text-[var(--ui-text)]">No hay recetas con estos filtros</h2>
+          <p className="mx-auto mt-2 max-w-2xl text-sm leading-6 text-[var(--ui-muted)]">
+            Limpia la busqueda o crea una nueva receta desde administracion.
+          </p>
+          <Link href={newRecipeHref({ siteId: requestedSiteId, areaId: requestedAreaId })} className="ui-btn ui-btn--brand ui-btn--sm mt-5">
+            Nueva receta
+          </Link>
         </section>
-      </form>
+      ) : (
+        <section className="space-y-5">
+          {recipeGroups.map((group) => (
+            <div key={group.key} className="rounded-[var(--ui-radius-card)] border border-[var(--ui-border)] bg-white p-4 shadow-[var(--ui-shadow-soft)] md:p-5">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="text-xs font-semibold uppercase text-[#C2410C]">Grupo</div>
+                  <h2 className="mt-1 text-2xl font-semibold text-[var(--ui-text)]">{group.title}</h2>
+                </div>
+                <span className="ui-chip ui-chip--brand">{group.recipes.length} recetas</span>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
+                {group.recipes.map((recipe) => {
+                  const product = one(recipe.products);
+                  const area = one(recipe.areas);
+                  const site = recipe.site_id ? siteMap.get(recipe.site_id) : null;
+                  const thumb = productImage(recipe);
+                  return (
+                    <article key={recipe.id} className="rounded-3xl border border-[var(--ui-border)] bg-[#FFFDFC] p-3 shadow-[var(--ui-shadow-soft)]">
+                      <div className="grid grid-cols-[84px_1fr] gap-3">
+                        <div
+                          className="flex h-[84px] w-[84px] items-center justify-center overflow-hidden rounded-2xl bg-[#FFF7ED] bg-cover bg-center text-2xl font-semibold text-[#F97316]"
+                          style={thumb ? { backgroundImage: `url("${thumb}")` } : undefined}
+                        >
+                          {!thumb ? String(product?.name ?? "R").trim().charAt(0).toUpperCase() || "R" : null}
+                        </div>
+
+                        <div className="min-w-0">
+                          <div className="line-clamp-2 text-base font-semibold leading-5 text-[var(--ui-text)]">
+                            {product?.name ?? "Producto"}
+                          </div>
+                          <div className="mt-1 text-xs text-[var(--ui-muted)]">{product?.sku ?? "Sin SKU"}</div>
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClass(recipe.status)}`}>
+                              {statusLabel(recipe.status)}
+                            </span>
+                            {!recipe.is_active ? (
+                              <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                                Inactiva
+                              </span>
+                            ) : null}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                        <div className="rounded-2xl border border-[#FED7AA] bg-[#FFF7ED] p-3">
+                          <div className="text-xs font-semibold uppercase text-[#C2410C]">Rendimiento</div>
+                          <div className="mt-1 font-semibold text-[var(--ui-text)]">{fmt(recipe.yield_qty)} {recipe.yield_unit}</div>
+                        </div>
+                        <div className="rounded-2xl border border-[var(--ui-border)] bg-white p-3">
+                          <div className="text-xs font-semibold uppercase text-[var(--ui-muted)]">Porcion</div>
+                          <div className="mt-1 font-semibold text-[var(--ui-text)]">
+                            {recipe.portion_size ? `${fmt(recipe.portion_size)} ${recipe.portion_unit ?? recipe.yield_unit}` : "Pendiente"}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mt-3 text-xs leading-5 text-[var(--ui-muted)]">
+                        {siteLabel(site)} · {areaLabel(area)} · {difficultyLabel(recipe.difficulty)}
+                      </div>
+
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <Link href={editRecipeHref(recipe)} className="ui-btn ui-btn--brand ui-btn--sm flex-1">
+                          Editar
+                        </Link>
+                        <Link href={`/recipe-book?recipe_id=${encodeURIComponent(recipe.id)}`} className="ui-btn ui-btn--ghost ui-btn--sm flex-1">
+                          Ver ficha
+                        </Link>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </section>
+      )}
     </div>
   );
 }

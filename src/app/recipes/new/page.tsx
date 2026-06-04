@@ -464,6 +464,62 @@ async function saveRecipe(formData: FormData) {
   redirect(`/recipes?${qs.toString()}`);
 }
 
+
+function RecipeFormSafetyScript() {
+  return (
+    <script
+      dangerouslySetInnerHTML={{
+        __html: `
+(function () {
+  var form = document.getElementById("fogo-recipe-form");
+  if (!form) return;
+
+  var errorBox = document.getElementById("fogo-recipe-client-error");
+
+  function fieldValue(name) {
+    var field = form.querySelector('[name="' + name + '"]');
+    if (!field || typeof field.value === "undefined") return "";
+    return String(field.value || "").trim();
+  }
+
+  function showClientError(message) {
+    if (errorBox) {
+      errorBox.hidden = false;
+      errorBox.textContent = message;
+    } else {
+      window.alert(message);
+    }
+
+    window.requestAnimationFrame(function () {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    });
+  }
+
+  form.addEventListener("submit", function (event) {
+    var status = fieldValue("status").toLowerCase() || "draft";
+    var siteId = fieldValue("site_id");
+    var areaId = fieldValue("area_id");
+
+    if (status === "published" && (!siteId || !areaId)) {
+      event.preventDefault();
+      showClientError("Para publicar debes seleccionar sede y area productiva. No se envio el formulario, asi que no se pierde lo que escribiste.");
+      return false;
+    }
+
+    if (errorBox) {
+      errorBox.hidden = true;
+      errorBox.textContent = "";
+    }
+
+    return true;
+  });
+})();
+        `,
+      }}
+    />
+  );
+}
+
 export default async function NewRecipePage({
   searchParams,
 }: {
@@ -668,9 +724,12 @@ export default async function NewRecipePage({
           </div>
         ) : null}
         {error ? <div className="mt-3 ui-alert ui-alert--warn">{error}</div> : null}
+        <div id="fogo-recipe-client-error" className="mt-3 ui-alert ui-alert--warn" hidden />
       </section>
 
-      <form action={saveRecipe} className="space-y-6">
+      <RecipeFormSafetyScript />
+
+      <form id="fogo-recipe-form" action={saveRecipe} className="space-y-6">
         <section className="ui-panel space-y-5">
           <div className="grid gap-4 md:grid-cols-2">
             <input type="hidden" name="source" value={source || "fogo"} />

@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import {
   Document,
+  Font,
   Page,
   StyleSheet,
   Text,
@@ -16,14 +17,17 @@ export const runtime = "nodejs";
 const APP_ID = "fogo";
 const UNASSIGNED_SITE_ID = "__sin_sede__";
 const UNASSIGNED_AREA_ID = "__sin_area__";
+const PUBLISHED_STATUS = "published";
+
+Font.registerHyphenationCallback((word) => [word]);
 
 type Relation<T> = T | T[] | null | undefined;
 
 type ProductShape = {
   id?: string;
   name: string | null;
-  sku: string | null;
-  unit: string | null;
+  sku?: string | null;
+  unit?: string | null;
   stock_unit_code?: string | null;
 };
 
@@ -82,9 +86,7 @@ type StepRow = {
 
 type PreparedIngredient = {
   name: string;
-  sku: string;
-  quantity: string;
-  unit: string;
+  amount: string;
 };
 
 type PreparedStep = {
@@ -97,16 +99,12 @@ type PreparedStep = {
 type PreparedRecipe = {
   id: string;
   name: string;
-  sku: string;
-  initial: string;
+  globalIndex: number;
   status: string;
-  isActive: boolean;
   description: string;
   site: string;
   area: string;
   groupTitle: string;
-  groupIndex: number;
-  recipeIndex: number;
   yieldText: string;
   portionText: string;
   timeText: string;
@@ -135,25 +133,113 @@ function clean(value: unknown, fallback = "-") {
   return text || fallback;
 }
 
+function normalizeText(value: unknown) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s._/-]+/g, "");
+}
+
 function fmt(value: number | null | undefined, digits = 2) {
   if (value == null || !Number.isFinite(Number(value))) return "-";
-  return new Intl.NumberFormat("es-CO", { maximumFractionDigits: digits }).format(Number(value));
+  return new Intl.NumberFormat("es-CO", {
+    maximumFractionDigits: digits,
+  }).format(Number(value));
+}
+
+function formatSmartNumber(value: number) {
+  const abs = Math.abs(value);
+  const digits = abs >= 100 ? 0 : abs >= 10 ? 2 : 3;
+  return new Intl.NumberFormat("es-CO", {
+    maximumFractionDigits: digits,
+  }).format(value);
+}
+
+function unitName(singular: string, plural: string, value: number) {
+  return Math.abs(value) === 1 ? singular : plural;
+}
+
+function formatProductionQuantity(
+  quantity: number | null | undefined,
+  unit: string | null | undefined,
+  fallback = "Pendiente"
+) {
+  if (quantity == null || !Number.isFinite(Number(quantity))) return fallback;
+
+  const rawUnit = clean(unit, "");
+  const normalized = normalizeText(rawUnit);
+  let value = Number(quantity);
+  let singular = rawUnit || "";
+  let plural = rawUnit || "";
+
+  if (["g", "gr", "gramo", "gramos", "gram"].includes(normalized)) {
+    if (Math.abs(value) >= 1000) {
+      value = value / 1000;
+      singular = "kilogramo";
+      plural = "kilogramos";
+    } else {
+      singular = "gramo";
+      plural = "gramos";
+    }
+  } else if (["kg", "kilo", "kilos", "kilogramo", "kilogramos", "kilogram"].includes(normalized)) {
+    singular = "kilogramo";
+    plural = "kilogramos";
+  } else if (["ml", "mililitro", "mililitros", "milliliter", "milliliters", "cc", "cm3"].includes(normalized)) {
+    if (Math.abs(value) >= 1000) {
+      value = value / 1000;
+      singular = "litro";
+      plural = "litros";
+    } else {
+      singular = "mililitro";
+      plural = "mililitros";
+    }
+  } else if (["l", "lt", "lts", "litro", "litros", "liter", "liters"].includes(normalized)) {
+    singular = "litro";
+    plural = "litros";
+  } else if (["un", "und", "unds", "unidad", "unidades", "u", "pz", "pieza", "piezas"].includes(normalized)) {
+    singular = "unidad";
+    plural = "unidades";
+  } else if (["cda", "cucharada", "cucharadas"].includes(normalized)) {
+    singular = "cucharada";
+    plural = "cucharadas";
+  } else if (["cdta", "cucharadita", "cucharaditas"].includes(normalized)) {
+    singular = "cucharadita";
+    plural = "cucharaditas";
+  }
+
+  const numberText = formatSmartNumber(value);
+  const unitText = singular || plural ? unitName(singular, plural || singular, value) : "";
+  return unitText ? `${numberText} ${unitText}` : numberText;
+}
+
+function formatMinutes(value: number | null | undefined, fallback = "-") {
+  if (value == null || !Number.isFinite(Number(value))) return fallback;
+  const minutes = Number(value);
+  return `${fmt(minutes, 0)} ${unitName("minuto", "minutos", minutes)}`;
+}
+
+function formatDays(value: number | null | undefined, fallback = "-") {
+  if (value == null || !Number.isFinite(Number(value))) return fallback;
+  const days = Number(value);
+  return `${fmt(days, 0)} ${unitName("día", "días", days)}`;
 }
 
 function productName(recipe: RecipeCardRow | null | undefined) {
   return one(recipe?.products)?.name || "Receta sin nombre";
 }
 
-function productSku(recipe: RecipeCardRow | null | undefined) {
-  return one(recipe?.products)?.sku || "Sin SKU";
-}
-
 function areaLabel(area: AreaShape | null | undefined) {
-  return area?.name || area?.kind || "Sin area";
+  return area?.name || area?.kind || "Sin área";
 }
 
 function siteLabel(site: SiteShape | null | undefined) {
   return site?.name || site?.site_type || "Sin sede";
+}
+
+function groupLabel(site: SiteShape | null | undefined, area: AreaShape | null | undefined) {
+  return `${siteLabel(site)} · ${areaLabel(area)}`;
 }
 
 function statusLabel(value: string | null | undefined) {
@@ -165,11 +251,11 @@ function statusLabel(value: string | null | undefined) {
 }
 
 function difficultyLabel(value: string | null | undefined) {
-  const normalized = String(value ?? "").trim().toLowerCase();
+  const normalized = normalizeText(value);
   if (!normalized) return "Simple";
-  if (normalized === "facil") return "Facil";
-  if (normalized === "medio") return "Media";
-  if (normalized === "dificil") return "Dificil";
+  if (normalized === "facil") return "Fácil";
+  if (normalized === "medio" || normalized === "media") return "Media";
+  if (normalized === "dificil") return "Difícil";
   return String(value);
 }
 
@@ -194,7 +280,7 @@ function configText(config: Record<string, unknown> | null | undefined, keys: st
     const value = config[key];
     if (typeof value === "string" && value.trim()) return value.trim();
     if (typeof value === "number" && Number.isFinite(value)) return String(value);
-    if (typeof value === "boolean") return value ? "Si" : "No";
+    if (typeof value === "boolean") return value ? "Sí" : "No";
   }
   return "";
 }
@@ -221,119 +307,146 @@ function safeFilename(value: string) {
     .toLowerCase();
 }
 
-function firstInitial(value: string) {
-  return clean(value, "R").charAt(0).toUpperCase();
-}
-
 const styles = StyleSheet.create({
   page: {
-    paddingTop: 28,
-    paddingRight: 32,
-    paddingBottom: 34,
-    paddingLeft: 32,
-    backgroundColor: "#FFFDFB",
+    paddingTop: 34,
+    paddingRight: 38,
+    paddingBottom: 42,
+    paddingLeft: 38,
+    backgroundColor: "#FFFDF9",
     color: "#211B17",
     fontFamily: "Helvetica",
     fontSize: 9,
-    lineHeight: 1.32,
+    lineHeight: 1.34,
   },
   coverPage: {
-    padding: 0,
-    backgroundColor: "#211B17",
-    color: "#FFF7ED",
+    paddingTop: 44,
+    paddingRight: 44,
+    paddingBottom: 44,
+    paddingLeft: 44,
+    backgroundColor: "#F7F0E8",
+    color: "#211B17",
     fontFamily: "Helvetica",
   },
-  coverTop: {
-    paddingTop: 58,
-    paddingRight: 48,
-    paddingBottom: 34,
-    paddingLeft: 48,
-    minHeight: 560,
+  coverFrame: {
+    flexGrow: 1,
+    paddingTop: 34,
+    paddingRight: 34,
+    paddingBottom: 30,
+    paddingLeft: 34,
+    borderWidth: 1,
+    borderColor: "#E5D2C0",
+    borderRadius: 26,
+    backgroundColor: "#FFFDF9",
   },
   coverBrandRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
   },
+  markRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
   logoMark: {
-    width: 54,
-    height: 54,
-    borderRadius: 16,
+    width: 42,
+    height: 42,
+    borderRadius: 12,
     backgroundColor: "#F97316",
     color: "#FFFFFF",
     alignItems: "center",
     justifyContent: "center",
   },
   logoText: {
-    fontSize: 18,
+    fontSize: 14,
     fontFamily: "Helvetica-Bold",
   },
   brandName: {
-    marginTop: 8,
-    fontSize: 9,
-    letterSpacing: 2.8,
+    fontSize: 8,
+    letterSpacing: 2.2,
     textTransform: "uppercase",
-    color: "#FED7AA",
+    color: "#8A7465",
+    fontFamily: "Helvetica-Bold",
+  },
+  internalTag: {
+    paddingTop: 6,
+    paddingRight: 10,
+    paddingBottom: 6,
+    paddingLeft: 10,
+    borderRadius: 999,
+    backgroundColor: "#211B17",
+    color: "#FFF7ED",
+    fontSize: 7,
+    letterSpacing: 1.1,
+    textTransform: "uppercase",
+    fontFamily: "Helvetica-Bold",
+  },
+  coverRule: {
+    marginTop: 86,
+    width: 82,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "#F97316",
   },
   coverKicker: {
-    marginTop: 74,
-    fontSize: 9,
-    letterSpacing: 2.6,
-    textTransform: "uppercase",
-    color: "#FDBA74",
-    fontFamily: "Helvetica-Bold",
-  },
-  coverTitle: {
-    marginTop: 14,
-    maxWidth: 430,
-    fontSize: 50,
-    lineHeight: 0.95,
-    letterSpacing: -1.2,
-    fontFamily: "Helvetica-Bold",
-    color: "#FFFFFF",
-  },
-  coverSubtitle: {
-    marginTop: 20,
-    maxWidth: 390,
-    fontSize: 12,
-    lineHeight: 1.55,
-    color: "#FDEAD6",
-  },
-  coverAccentCard: {
-    marginTop: 38,
-    width: 300,
-    padding: 16,
-    borderRadius: 18,
-    backgroundColor: "#FFF7ED",
-    color: "#211B17",
-  },
-  coverAccentTitle: {
+    marginTop: 18,
     fontSize: 8,
-    letterSpacing: 1.5,
+    letterSpacing: 2.4,
     textTransform: "uppercase",
     color: "#C2410C",
     fontFamily: "Helvetica-Bold",
   },
-  coverAccentValue: {
-    marginTop: 8,
-    fontSize: 22,
+  coverTitle: {
+    marginTop: 14,
+    maxWidth: 390,
+    fontSize: 39,
+    lineHeight: 1.02,
+    letterSpacing: -0.7,
+    fontFamily: "Helvetica-Bold",
+    color: "#211B17",
+  },
+  coverSubtitle: {
+    marginTop: 18,
+    maxWidth: 386,
+    fontSize: 11.5,
+    lineHeight: 1.52,
+    color: "#5F5148",
+  },
+  coverMetaPanel: {
+    marginTop: 54,
+    paddingTop: 18,
+    paddingRight: 18,
+    paddingBottom: 18,
+    paddingLeft: 18,
+    borderRadius: 18,
+    backgroundColor: "#211B17",
+    color: "#FFF7ED",
+  },
+  coverMetaTitle: {
+    fontSize: 8,
+    letterSpacing: 1.4,
+    textTransform: "uppercase",
+    color: "#FDBA74",
     fontFamily: "Helvetica-Bold",
   },
-  coverBottom: {
+  coverMetaValue: {
+    marginTop: 7,
+    fontSize: 18,
+    fontFamily: "Helvetica-Bold",
+    color: "#FFFFFF",
+  },
+  coverMetricsRow: {
+    marginTop: 14,
     flexDirection: "row",
     gap: 10,
-    paddingTop: 20,
-    paddingRight: 48,
-    paddingBottom: 44,
-    paddingLeft: 48,
-    backgroundColor: "#FFF7ED",
-    color: "#211B17",
   },
   coverMetric: {
     flexGrow: 1,
-    padding: 14,
-    borderRadius: 15,
-    backgroundColor: "#FFFFFF",
+    padding: 12,
+    borderRadius: 13,
+    backgroundColor: "#FFF7ED",
+    color: "#211B17",
   },
   smallLabel: {
     fontSize: 7,
@@ -343,12 +456,12 @@ const styles = StyleSheet.create({
     fontFamily: "Helvetica-Bold",
   },
   metricNumber: {
-    marginTop: 6,
-    fontSize: 21,
+    marginTop: 5,
+    fontSize: 18,
     fontFamily: "Helvetica-Bold",
   },
   topBar: {
-    marginBottom: 16,
+    marginBottom: 18,
     paddingBottom: 10,
     borderBottomWidth: 1,
     borderBottomColor: "#EADDD0",
@@ -357,92 +470,120 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   docTitle: {
-    fontSize: 9,
-    letterSpacing: 1.7,
+    fontSize: 8,
+    letterSpacing: 1.5,
     textTransform: "uppercase",
     color: "#C2410C",
     fontFamily: "Helvetica-Bold",
   },
   docMeta: {
+    maxWidth: 250,
     fontSize: 8,
     color: "#8A7465",
+    textAlign: "right",
   },
   h1: {
-    fontSize: 25,
+    fontSize: 27,
     lineHeight: 1.05,
     fontFamily: "Helvetica-Bold",
     color: "#211B17",
   },
   h2: {
-    marginBottom: 10,
-    fontSize: 17,
+    fontSize: 15,
+    lineHeight: 1.15,
     fontFamily: "Helvetica-Bold",
     color: "#211B17",
   },
   h3: {
-    fontSize: 18,
-    lineHeight: 1.05,
+    fontSize: 21,
+    lineHeight: 1.06,
     fontFamily: "Helvetica-Bold",
     color: "#211B17",
   },
   muted: {
     color: "#72665D",
   },
-  chapterGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-  },
-  chapterCard: {
-    width: "48.5%",
-    padding: 14,
-    borderWidth: 1,
-    borderColor: "#EADDD0",
-    borderRadius: 14,
-    backgroundColor: "#FFFFFF",
-  },
-  chapterTitle: {
-    marginTop: 5,
-    fontSize: 12,
-    fontFamily: "Helvetica-Bold",
-  },
-  recipeListItem: {
-    marginTop: 5,
-    paddingTop: 5,
-    borderTopWidth: 1,
-    borderTopColor: "#F1E5DA",
-    fontSize: 8,
+  indexIntro: {
+    marginTop: 7,
+    marginBottom: 18,
+    fontSize: 10,
     color: "#72665D",
   },
-  recipeHeader: {
-    flexDirection: "row",
-    gap: 14,
-    marginBottom: 14,
+  indexGroup: {
+    marginBottom: 18,
   },
-  recipeInitial: {
-    width: 62,
-    height: 62,
-    borderRadius: 18,
-    backgroundColor: "#FFF7ED",
-    color: "#F97316",
-    alignItems: "center",
-    justifyContent: "center",
+  indexGroupHeader: {
+    marginBottom: 6,
+    paddingTop: 9,
+    paddingRight: 11,
+    paddingBottom: 9,
+    paddingLeft: 11,
+    borderRadius: 12,
+    backgroundColor: "#211B17",
+    color: "#FFF7ED",
   },
-  recipeInitialText: {
-    fontSize: 28,
+  indexGroupLabel: {
+    fontSize: 7,
+    letterSpacing: 1.2,
+    textTransform: "uppercase",
+    color: "#FDBA74",
     fontFamily: "Helvetica-Bold",
   },
-  statusRow: {
+  indexGroupTitle: {
+    marginTop: 4,
+    fontSize: 13,
+    lineHeight: 1.15,
+    fontFamily: "Helvetica-Bold",
+    color: "#FFFFFF",
+  },
+  indexRecipeRow: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 5,
-    marginBottom: 7,
+    alignItems: "center",
+    paddingTop: 6,
+    paddingRight: 2,
+    paddingBottom: 6,
+    paddingLeft: 2,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F0E4D9",
+  },
+  indexNumber: {
+    width: 34,
+    fontSize: 8,
+    color: "#C2410C",
+    fontFamily: "Helvetica-Bold",
+  },
+  indexRecipeName: {
+    flexGrow: 1,
+    fontSize: 9.2,
+    color: "#211B17",
+  },
+  indexRecipeMeta: {
+    width: 120,
+    fontSize: 8,
+    color: "#8A7465",
+    textAlign: "right",
+  },
+  recipeHero: {
+    marginBottom: 14,
+    paddingTop: 14,
+    paddingRight: 16,
+    paddingBottom: 14,
+    paddingLeft: 16,
+    borderRadius: 16,
+    backgroundColor: "#211B17",
+    color: "#FFF7ED",
+  },
+  recipeHeroTop: {
+    marginBottom: 10,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
   },
   pill: {
     paddingTop: 4,
-    paddingRight: 7,
+    paddingRight: 8,
     paddingBottom: 4,
-    paddingLeft: 7,
+    paddingLeft: 8,
     borderRadius: 999,
     backgroundColor: "#FFF7ED",
     color: "#C2410C",
@@ -451,22 +592,30 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     fontFamily: "Helvetica-Bold",
   },
-  pillGreen: {
-    backgroundColor: "#ECFDF5",
-    color: "#047857",
+  pillDark: {
+    backgroundColor: "#3A2D26",
+    color: "#FDBA74",
   },
-  recipeSku: {
-    marginTop: 4,
-    color: "#C2410C",
-    fontSize: 8,
+  recipeTitle: {
+    maxWidth: 470,
+    fontSize: 23,
+    lineHeight: 1.05,
+    letterSpacing: -0.2,
     fontFamily: "Helvetica-Bold",
+    color: "#FFFFFF",
   },
   recipeDescription: {
-    marginTop: 6,
-    maxWidth: 420,
-    color: "#72665D",
-    fontSize: 8.5,
+    marginTop: 7,
+    maxWidth: 465,
+    color: "#FDEAD6",
+    fontSize: 8.8,
     lineHeight: 1.35,
+  },
+  recipeLocation: {
+    marginTop: 7,
+    color: "#FDBA74",
+    fontSize: 8,
+    fontFamily: "Helvetica-Bold",
   },
   metricsGrid: {
     flexDirection: "row",
@@ -484,14 +633,15 @@ const styles = StyleSheet.create({
   },
   metricValue: {
     marginTop: 4,
-    fontSize: 10,
+    fontSize: 9.4,
+    lineHeight: 1.15,
     fontFamily: "Helvetica-Bold",
     color: "#211B17",
   },
   infoGrid: {
     flexDirection: "row",
     gap: 6,
-    marginBottom: 14,
+    marginBottom: 16,
   },
   infoCard: {
     flexGrow: 1,
@@ -501,24 +651,25 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     backgroundColor: "#FFFDFC",
   },
-  twoColumn: {
+  sectionBlock: {
+    marginTop: 10,
+  },
+  sectionHeader: {
+    marginBottom: 7,
     flexDirection: "row",
-    gap: 14,
-    alignItems: "flex-start",
-  },
-  leftColumn: {
-    width: "43%",
-  },
-  rightColumn: {
-    width: "57%",
+    justifyContent: "space-between",
+    alignItems: "flex-end",
   },
   sectionLabel: {
-    marginBottom: 6,
     fontSize: 8,
     letterSpacing: 1.1,
     textTransform: "uppercase",
     color: "#C2410C",
     fontFamily: "Helvetica-Bold",
+  },
+  sectionSubtle: {
+    fontSize: 8,
+    color: "#8A7465",
   },
   table: {
     borderWidth: 1,
@@ -538,19 +689,19 @@ const styles = StyleSheet.create({
     borderBottomColor: "#F1E5DA",
   },
   tableCell: {
-    paddingTop: 6,
-    paddingRight: 6,
-    paddingBottom: 6,
-    paddingLeft: 6,
-    fontSize: 7.2,
+    paddingTop: 7,
+    paddingRight: 8,
+    paddingBottom: 7,
+    paddingLeft: 8,
+    fontSize: 8,
   },
   tableHeadCell: {
-    paddingTop: 6,
-    paddingRight: 6,
-    paddingBottom: 6,
-    paddingLeft: 6,
-    fontSize: 6.5,
-    letterSpacing: 0.6,
+    paddingTop: 7,
+    paddingRight: 8,
+    paddingBottom: 7,
+    paddingLeft: 8,
+    fontSize: 6.8,
+    letterSpacing: 0.7,
     textTransform: "uppercase",
     color: "#C2410C",
     fontFamily: "Helvetica-Bold",
@@ -559,9 +710,17 @@ const styles = StyleSheet.create({
     fontFamily: "Helvetica-Bold",
     color: "#211B17",
   },
+  amountText: {
+    color: "#211B17",
+    fontFamily: "Helvetica-Bold",
+    textAlign: "right",
+  },
   stepCard: {
-    marginBottom: 6,
-    padding: 8,
+    marginBottom: 7,
+    paddingTop: 9,
+    paddingRight: 10,
+    paddingBottom: 9,
+    paddingLeft: 10,
     borderWidth: 1,
     borderColor: "#EADDD0",
     borderRadius: 12,
@@ -570,13 +729,13 @@ const styles = StyleSheet.create({
   stepHeader: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 5,
-    marginBottom: 5,
+    gap: 6,
+    marginBottom: 6,
   },
   stepNumber: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
     backgroundColor: "#F97316",
     color: "#FFFFFF",
     alignItems: "center",
@@ -588,9 +747,9 @@ const styles = StyleSheet.create({
   },
   stepTime: {
     paddingTop: 3,
-    paddingRight: 6,
+    paddingRight: 7,
     paddingBottom: 3,
-    paddingLeft: 6,
+    paddingLeft: 7,
     borderRadius: 999,
     backgroundColor: "#FFF7ED",
     color: "#C2410C",
@@ -598,8 +757,8 @@ const styles = StyleSheet.create({
     fontFamily: "Helvetica-Bold",
   },
   stepText: {
-    fontSize: 8,
-    lineHeight: 1.32,
+    fontSize: 8.4,
+    lineHeight: 1.33,
     color: "#211B17",
   },
   stepTip: {
@@ -613,7 +772,7 @@ const styles = StyleSheet.create({
     borderRadius: 7,
     backgroundColor: "#FFF7ED",
     color: "#9A3412",
-    fontSize: 7.4,
+    fontSize: 7.6,
     lineHeight: 1.28,
   },
   emptyBox: {
@@ -627,9 +786,9 @@ const styles = StyleSheet.create({
   },
   footer: {
     position: "absolute",
-    left: 32,
-    right: 32,
-    bottom: 16,
+    left: 38,
+    right: 38,
+    bottom: 18,
     paddingTop: 7,
     borderTopWidth: 1,
     borderTopColor: "#EADDD0",
@@ -643,16 +802,14 @@ const styles = StyleSheet.create({
 function Footer({ generatedAt }: { generatedAt: string }) {
   return (
     <View style={styles.footer} fixed>
-      <Text>FOGO - Vento Group - Documento interno</Text>
-      <Text
-        render={({ pageNumber, totalPages }) => `${generatedAt} - Pagina ${pageNumber} de ${totalPages}`}
-      />
+      <Text>FOGO | Vento Group | Documento interno</Text>
+      <Text render={({ pageNumber, totalPages }) => `${generatedAt} | Página ${pageNumber} de ${totalPages}`} />
     </View>
   );
 }
 
-function StatusPill({ label, tone = "orange" }: { label: string; tone?: "orange" | "green" }) {
-  return <Text style={tone === "green" ? [styles.pill, styles.pillGreen] : styles.pill}>{label}</Text>;
+function StatusPill({ label, tone = "light" }: { label: string; tone?: "light" | "dark" }) {
+  return <Text style={tone === "dark" ? [styles.pill, styles.pillDark] : styles.pill}>{label}</Text>;
 }
 
 function Metric({ label, value }: { label: string; value: string }) {
@@ -677,20 +834,14 @@ function IngredientsTable({ ingredients }: { ingredients: PreparedIngredient[] }
   return (
     <View style={styles.table}>
       <View style={styles.tableHeader} fixed>
-        <Text style={[styles.tableHeadCell, { width: "44%" }]}>Ingrediente</Text>
-        <Text style={[styles.tableHeadCell, { width: "28%" }]}>SKU</Text>
-        <Text style={[styles.tableHeadCell, { width: "16%", textAlign: "right" }]}>Cant.</Text>
-        <Text style={[styles.tableHeadCell, { width: "12%" }]}>Un.</Text>
+        <Text style={[styles.tableHeadCell, { width: "68%" }]}>Ingrediente</Text>
+        <Text style={[styles.tableHeadCell, { width: "32%", textAlign: "right" }]}>Cantidad</Text>
       </View>
       {ingredients.length > 0 ? (
         ingredients.map((ingredient, index) => (
-          <View key={`${ingredient.sku}-${index}`} style={styles.tableRow} wrap={false}>
-            <Text style={[styles.tableCell, styles.ingredientName, { width: "44%" }]}>{ingredient.name}</Text>
-            <Text style={[styles.tableCell, styles.muted, { width: "28%" }]}>{ingredient.sku}</Text>
-            <Text style={[styles.tableCell, { width: "16%", textAlign: "right", fontFamily: "Helvetica-Bold" }]}>
-              {ingredient.quantity}
-            </Text>
-            <Text style={[styles.tableCell, styles.muted, { width: "12%" }]}>{ingredient.unit}</Text>
+          <View key={`${ingredient.name}-${index}`} style={styles.tableRow} wrap={false}>
+            <Text style={[styles.tableCell, styles.ingredientName, { width: "68%" }]}>{ingredient.name}</Text>
+            <Text style={[styles.tableCell, styles.amountText, { width: "32%" }]}>{ingredient.amount}</Text>
           </View>
         ))
       ) : (
@@ -738,41 +889,44 @@ function CoverPage({
 }) {
   return (
     <Page size="A4" style={styles.coverPage}>
-      <View style={styles.coverTop}>
+      <View style={styles.coverFrame}>
         <View style={styles.coverBrandRow}>
-          <View>
+          <View style={styles.markRow}>
             <View style={styles.logoMark}>
               <Text style={styles.logoText}>FG</Text>
             </View>
-            <Text style={styles.brandName}>VENTO GROUP</Text>
+            <View>
+              <Text style={styles.brandName}>VENTO GROUP</Text>
+              <Text style={[styles.muted, { marginTop: 3, fontSize: 8 }]}>FOGO</Text>
+            </View>
           </View>
-          <Text style={{ color: "#FDBA74", fontSize: 8, letterSpacing: 1.6 }}>DOCUMENTO INTERNO</Text>
+          <Text style={styles.internalTag}>Uso interno</Text>
         </View>
 
-        <Text style={styles.coverKicker}>FOGO - RECETARIO DE PRODUCCION</Text>
-        <Text style={styles.coverTitle}>Fichas tecnicas operativas</Text>
+        <View style={styles.coverRule} />
+        <Text style={styles.coverKicker}>Recetario de producción</Text>
+        <Text style={styles.coverTitle}>Fichas técnicas operativas</Text>
         <Text style={styles.coverSubtitle}>
-          Documento estructurado para produccion: rendimiento, porcionamiento, ingredientes, empaque, almacenamiento y paso a paso operativo.
+          Documento de consulta para cocina: rendimiento, porcionamiento, ingredientes, empaque, almacenamiento y paso a paso de producción.
         </Text>
 
-        <View style={styles.coverAccentCard}>
-          <Text style={styles.coverAccentTitle}>Generado</Text>
-          <Text style={styles.coverAccentValue}>{generatedAt}</Text>
-        </View>
-      </View>
-
-      <View style={styles.coverBottom}>
-        <View style={styles.coverMetric}>
-          <Text style={styles.smallLabel}>Recetas</Text>
-          <Text style={styles.metricNumber}>{recipeCount}</Text>
-        </View>
-        <View style={styles.coverMetric}>
-          <Text style={styles.smallLabel}>Capitulos</Text>
-          <Text style={styles.metricNumber}>{groupCount}</Text>
-        </View>
-        <View style={[styles.coverMetric, { flexBasis: 200 }]}>
-          <Text style={styles.smallLabel}>Filtro aplicado</Text>
-          <Text style={[styles.metricNumber, { fontSize: 13, lineHeight: 1.25 }]}>{filterText || "Todos"}</Text>
+        <View style={styles.coverMetaPanel}>
+          <Text style={styles.coverMetaTitle}>Generado</Text>
+          <Text style={styles.coverMetaValue}>{generatedAt}</Text>
+          <View style={styles.coverMetricsRow}>
+            <View style={styles.coverMetric}>
+              <Text style={styles.smallLabel}>Recetas</Text>
+              <Text style={styles.metricNumber}>{recipeCount}</Text>
+            </View>
+            <View style={styles.coverMetric}>
+              <Text style={styles.smallLabel}>Capítulos</Text>
+              <Text style={styles.metricNumber}>{groupCount}</Text>
+            </View>
+            <View style={[styles.coverMetric, { flexBasis: 190 }]}>
+              <Text style={styles.smallLabel}>Criterio</Text>
+              <Text style={[styles.metricNumber, { fontSize: 12, lineHeight: 1.25 }]}>{filterText || "Recetas publicadas"}</Text>
+            </View>
+          </View>
         </View>
       </View>
     </Page>
@@ -781,32 +935,31 @@ function CoverPage({
 
 function IndexPage({ groups, generatedAt }: { groups: PreparedGroup[]; generatedAt: string }) {
   return (
-    <Page size="A4" style={styles.page}>
+    <Page size="A4" style={styles.page} wrap>
       <View style={styles.topBar} fixed>
-        <Text style={styles.docTitle}>FOGO - Indice</Text>
-        <Text style={styles.docMeta}>Recetario de produccion</Text>
+        <Text style={styles.docTitle}>FOGO - Índice</Text>
+        <Text style={styles.docMeta}>Recetario de producción</Text>
       </View>
 
-      <Text style={styles.h1}>Capitulos</Text>
-      <Text style={[styles.muted, { marginTop: 8, marginBottom: 18 }]}>Resumen de grupos incluidos en este recetario.</Text>
+      <Text style={styles.h1}>Índice</Text>
+      <Text style={styles.indexIntro}>Recetas publicadas organizadas por sede y área de producción.</Text>
 
-      <View style={styles.chapterGrid}>
-        {groups.map((group, groupIndex) => (
-          <View key={group.key} style={styles.chapterCard} wrap={false}>
-            <Text style={styles.smallLabel}>Capitulo {groupIndex + 1}</Text>
-            <Text style={styles.chapterTitle}>{group.title}</Text>
-            <Text style={[styles.muted, { marginTop: 5 }]}>{group.recipes.length} recetas</Text>
-            {group.recipes.slice(0, 4).map((recipe) => (
-              <Text key={recipe.id} style={styles.recipeListItem}>
-                {recipe.name} - {recipe.sku}
-              </Text>
-            ))}
-            {group.recipes.length > 4 ? (
-              <Text style={[styles.muted, { marginTop: 5 }]}>+ {group.recipes.length - 4} recetas adicionales</Text>
-            ) : null}
+      {groups.map((group, groupIndex) => (
+        <View key={group.key} style={styles.indexGroup}>
+          <View style={styles.indexGroupHeader} wrap={false}>
+            <Text style={styles.indexGroupLabel}>Capítulo {groupIndex + 1} - {group.recipes.length} recetas</Text>
+            <Text style={styles.indexGroupTitle}>{group.title}</Text>
           </View>
-        ))}
-      </View>
+
+          {group.recipes.map((recipe) => (
+            <View key={recipe.id} style={styles.indexRecipeRow} wrap={false}>
+              <Text style={styles.indexNumber}>{String(recipe.globalIndex).padStart(2, "0")}</Text>
+              <Text style={styles.indexRecipeName}>{recipe.name}</Text>
+              <Text style={styles.indexRecipeMeta}>Ficha técnica</Text>
+            </View>
+          ))}
+        </View>
+      ))}
 
       <Footer generatedAt={generatedAt} />
     </Page>
@@ -818,10 +971,10 @@ function EmptyPage({ generatedAt }: { generatedAt: string }) {
     <Page size="A4" style={styles.page}>
       <View style={styles.topBar} fixed>
         <Text style={styles.docTitle}>FOGO - Sin resultados</Text>
-        <Text style={styles.docMeta}>Recetario de produccion</Text>
+        <Text style={styles.docMeta}>Recetario de producción</Text>
       </View>
-      <Text style={styles.h1}>No hay recetas para exportar</Text>
-      <Text style={[styles.muted, { marginTop: 10 }]}>Ajusta los filtros en Administrar recetas y vuelve a generar el PDF.</Text>
+      <Text style={styles.h1}>No hay recetas publicadas para exportar</Text>
+      <Text style={[styles.muted, { marginTop: 10 }]}>Publica al menos una receta activa y vuelve a generar el PDF.</Text>
       <Footer generatedAt={generatedAt} />
     </Page>
   );
@@ -831,35 +984,27 @@ function RecipePage({ recipe, generatedAt }: { recipe: PreparedRecipe; generated
   return (
     <Page size="A4" style={styles.page} wrap>
       <View style={styles.topBar} fixed>
-        <Text style={styles.docTitle}>FOGO - Ficha tecnica</Text>
+        <Text style={styles.docTitle}>FOGO - Ficha técnica</Text>
         <Text style={styles.docMeta}>{recipe.groupTitle}</Text>
       </View>
 
-      <View style={styles.recipeHeader} wrap={false}>
-        <View style={styles.recipeInitial}>
-          <Text style={styles.recipeInitialText}>{recipe.initial}</Text>
+      <View style={styles.recipeHero} wrap={false}>
+        <View style={styles.recipeHeroTop}>
+          <StatusPill label={recipe.status} />
+          <StatusPill label={`Ficha ${String(recipe.globalIndex).padStart(2, "0")}`} tone="dark" />
         </View>
-        <View style={{ flexGrow: 1 }}>
-          <View style={styles.statusRow}>
-            <StatusPill label={recipe.status} tone={recipe.status === "Publicada" ? "green" : "orange"} />
-            {!recipe.isActive ? <StatusPill label="Inactiva" /> : null}
-            <StatusPill label={`Cap. ${recipe.groupIndex + 1}`} />
-            <StatusPill label={`Ficha ${recipe.recipeIndex + 1}`} />
-          </View>
-          <Text style={styles.h3}>{recipe.name}</Text>
-          <Text style={styles.recipeSku}>{recipe.sku}</Text>
-          <Text style={styles.recipeDescription}>{recipe.description}</Text>
-          <Text style={[styles.muted, { marginTop: 5, fontSize: 8 }]}>{recipe.site} - {recipe.area}</Text>
-        </View>
+        <Text style={styles.recipeTitle}>{recipe.name}</Text>
+        <Text style={styles.recipeDescription}>{recipe.description}</Text>
+        <Text style={styles.recipeLocation}>{recipe.site} · {recipe.area}</Text>
       </View>
 
       <View style={styles.metricsGrid} wrap={false}>
         <Metric label="Rendimiento" value={recipe.yieldText} />
-        <Metric label="Porcion" value={recipe.portionText} />
+        <Metric label="Porción" value={recipe.portionText} />
         <Metric label="Tiempo" value={recipe.timeText} />
-        <Metric label="Vida util" value={recipe.shelfLifeText} />
+        <Metric label="Vida útil" value={recipe.shelfLifeText} />
         <Metric label="Dificultad" value={recipe.difficulty} />
-        <Metric label="Vacio" value={recipe.vacuum} />
+        <Metric label="Vacío" value={recipe.vacuum} />
       </View>
 
       <View style={styles.infoGrid} wrap={false}>
@@ -868,16 +1013,20 @@ function RecipePage({ recipe, generatedAt }: { recipe: PreparedRecipe; generated
         <InfoCard label="Grupo" value={recipe.groupTitle} />
       </View>
 
-      <View style={styles.twoColumn}>
-        <View style={styles.leftColumn}>
+      <View style={styles.sectionBlock}>
+        <View style={styles.sectionHeader} wrap={false}>
           <Text style={styles.sectionLabel}>Ingredientes</Text>
-          <IngredientsTable ingredients={recipe.ingredients} />
+          <Text style={styles.sectionSubtle}>{recipe.ingredients.length} líneas</Text>
         </View>
+        <IngredientsTable ingredients={recipe.ingredients} />
+      </View>
 
-        <View style={styles.rightColumn}>
-          <Text style={styles.sectionLabel}>Paso a paso - {recipe.steps.length} pasos</Text>
-          <StepsList steps={recipe.steps} />
+      <View style={styles.sectionBlock}>
+        <View style={styles.sectionHeader} wrap={false}>
+          <Text style={styles.sectionLabel}>Procedimiento</Text>
+          <Text style={styles.sectionSubtle}>{recipe.steps.length} pasos</Text>
         </View>
+        <StepsList steps={recipe.steps} />
       </View>
 
       <Footer generatedAt={generatedAt} />
@@ -898,9 +1047,9 @@ function RecipesDocument({
 
   return (
     <Document
-      title="FOGO - Recetario de produccion"
+      title="FOGO - Recetario de producción"
       author="Vento Group"
-      subject="Fichas tecnicas operativas"
+      subject="Fichas técnicas operativas"
       creator="Vento OS - FOGO"
       producer="Vento OS - FOGO"
     >
@@ -924,7 +1073,7 @@ async function streamToBuffer(stream: NodeJS.ReadableStream) {
 export async function GET(request: NextRequest) {
   const requestedSiteId = String(request.nextUrl.searchParams.get("site_id") ?? "").trim();
   const requestedAreaId = String(request.nextUrl.searchParams.get("area_id") ?? "").trim();
-  const requestedStatus = String(request.nextUrl.searchParams.get("status") ?? "all").trim().toLowerCase();
+  const requestedStatus = String(request.nextUrl.searchParams.get("status") ?? PUBLISHED_STATUS).trim().toLowerCase();
   const searchTerm = String(request.nextUrl.searchParams.get("q") ?? "").trim();
   const searchNeedle = searchTerm.toLowerCase();
 
@@ -933,7 +1082,7 @@ export async function GET(request: NextRequest) {
     returnTo: recipesHref({
       siteId: requestedSiteId,
       areaId: requestedAreaId,
-      status: requestedStatus,
+      status: requestedStatus || PUBLISHED_STATUS,
       q: searchTerm,
     }),
     permissionCode: "production.recipes.manage",
@@ -945,6 +1094,8 @@ export async function GET(request: NextRequest) {
       .select(
         "id,product_id,site_id,area_id,yield_qty,yield_unit,portion_size,portion_unit,prep_time_minutes,shelf_life_days,difficulty,recipe_description,process_config,status,is_active,updated_at,products(id,name,sku,unit,stock_unit_code),areas(id,code,name,kind,site_id)"
       )
+      .eq("status", PUBLISHED_STATUS)
+      .eq("is_active", true)
       .order("updated_at", { ascending: false })
       .limit(1200),
     supabase
@@ -957,8 +1108,6 @@ export async function GET(request: NextRequest) {
   const recipeRows = (recipeRowsData ?? []) as RecipeCardRow[];
   const siteRows = (siteRowsData ?? []) as SiteShape[];
   const siteMap = new Map(siteRows.map((site) => [site.id, site]));
-  const selectedStatus = ["published", "draft", "archived"].includes(requestedStatus) ? requestedStatus : "all";
-
   const recipes = recipeRows
     .filter((recipe) => {
       if (requestedSiteId === UNASSIGNED_SITE_ID && recipe.site_id) return false;
@@ -967,7 +1116,8 @@ export async function GET(request: NextRequest) {
       if (requestedAreaId === UNASSIGNED_AREA_ID && recipe.area_id) return false;
       if (requestedAreaId && requestedAreaId !== UNASSIGNED_AREA_ID && recipe.area_id !== requestedAreaId) return false;
 
-      if (selectedStatus !== "all" && String(recipe.status ?? "").toLowerCase() !== selectedStatus) return false;
+      if (String(recipe.status ?? "").toLowerCase() !== PUBLISHED_STATUS) return false;
+      if (recipe.is_active === false) return false;
 
       if (!searchNeedle) return true;
       const product = one(recipe.products);
@@ -975,7 +1125,6 @@ export async function GET(request: NextRequest) {
       const site = recipe.site_id ? siteMap.get(recipe.site_id) : null;
       const haystack = [
         product?.name,
-        product?.sku,
         areaLabel(area),
         siteLabel(site),
         statusLabel(recipe.status),
@@ -1025,7 +1174,7 @@ export async function GET(request: NextRequest) {
   const { data: ingredientProductsData } = ingredientProductIds.length
     ? await supabase
         .from("products")
-        .select("id,name,sku,unit,stock_unit_code")
+        .select("id,name,unit,stock_unit_code")
         .in("id", ingredientProductIds)
     : { data: [] as IngredientProductShape[] };
 
@@ -1053,7 +1202,7 @@ export async function GET(request: NextRequest) {
       .reduce((map, recipe) => {
         const area = one(recipe.areas);
         const site = recipe.site_id ? siteMap.get(recipe.site_id) : null;
-        const title = `${siteLabel(site)} - ${areaLabel(area)}`;
+        const title = groupLabel(site, area);
         const key = `${recipe.site_id || "sin_sede"}::${recipe.area_id || "sin_area"}`;
         const group = map.get(key) ?? { key, title, recipes: [] as RecipeCardRow[] };
         group.recipes.push(recipe);
@@ -1069,29 +1218,31 @@ export async function GET(request: NextRequest) {
   }).format(new Date());
 
   const filterText = [
-    selectedStatus === "all" ? "Todos los estados" : statusLabel(selectedStatus),
-    searchTerm ? `Busqueda: ${searchTerm}` : null,
+    "Recetas publicadas",
+    searchTerm ? `Búsqueda: ${searchTerm}` : null,
   ]
     .filter(Boolean)
-    .join(" - ");
+    .join(" · ");
 
-  const groups: PreparedGroup[] = rawGroups.map((group, groupIndex) => ({
+  let globalRecipeIndex = 0;
+  const groups: PreparedGroup[] = rawGroups.map((group) => ({
     key: group.key,
     title: group.title,
-    recipes: group.recipes.map((recipe, recipeIndex) => {
+    recipes: group.recipes.map((recipe) => {
+      globalRecipeIndex += 1;
       const product = one(recipe.products);
       const area = one(recipe.areas);
       const site = recipe.site_id ? siteMap.get(recipe.site_id) : null;
       const ingredients = ingredientsByProductId.get(recipe.product_id) ?? [];
       const steps = stepsByRecipeCardId.get(recipe.id) ?? [];
       const portionText = recipe.portion_size
-        ? `${fmt(recipe.portion_size)} ${recipe.portion_unit ?? recipe.yield_unit}`
+        ? formatProductionQuantity(recipe.portion_size, recipe.portion_unit ?? recipe.yield_unit)
         : "Pendiente";
       const totalStepMinutes = steps.reduce((acc, step) => acc + Number(step.time_minutes ?? 0), 0);
       const timeText = recipe.prep_time_minutes
-        ? `${fmt(recipe.prep_time_minutes, 0)} min`
+        ? formatMinutes(recipe.prep_time_minutes)
         : totalStepMinutes > 0
-          ? `${fmt(totalStepMinutes, 0)} min`
+          ? formatMinutes(totalStepMinutes)
           : "-";
       const packageType =
         configText(recipe.process_config, ["package_type", "packaging_type", "bag_type", "tipo_bolsa"]) || "Pendiente";
@@ -1102,38 +1253,33 @@ export async function GET(request: NextRequest) {
       return {
         id: recipe.id,
         name: clean(product?.name, "Receta"),
-        sku: productSku(recipe),
-        initial: firstInitial(product?.name ?? "R"),
+        globalIndex: globalRecipeIndex,
         status: statusLabel(recipe.status),
-        isActive: recipe.is_active,
-        description: recipe.recipe_description || "Ficha tecnica de produccion para uso interno de Vento Group.",
+        description: recipe.recipe_description || "Ficha técnica de producción para uso interno de Vento Group.",
         site: siteLabel(site),
         area: areaLabel(area),
         groupTitle: group.title,
-        groupIndex,
-        recipeIndex,
-        yieldText: `${fmt(recipe.yield_qty)} ${recipe.yield_unit}`,
+        yieldText: formatProductionQuantity(recipe.yield_qty, recipe.yield_unit),
         portionText,
         timeText,
-        shelfLifeText: recipe.shelf_life_days ? `${fmt(recipe.shelf_life_days, 0)} dias` : "-",
+        shelfLifeText: formatDays(recipe.shelf_life_days),
         difficulty: difficultyLabel(recipe.difficulty),
-        vacuum: hasVacuumPackaging(recipe.process_config) ? "Si" : "No",
+        vacuum: hasVacuumPackaging(recipe.process_config) ? "Sí" : "No",
         packageType,
         storage,
         ingredients: ingredients.map((ingredient) => {
           const ingredientProduct = ingredientProductMap.get(String(ingredient.ingredient_product_id ?? ""));
+          const unit = ingredientProduct?.stock_unit_code || ingredientProduct?.unit || "";
           return {
             name: clean(ingredientProduct?.name, "Ingrediente"),
-            sku: clean(ingredientProduct?.sku, "-"),
-            quantity: fmt(ingredient.quantity, 3),
-            unit: ingredientProduct?.stock_unit_code || ingredientProduct?.unit || "-",
+            amount: formatProductionQuantity(ingredient.quantity, unit),
           };
         }),
         steps: steps.map((step) => ({
           number: step.step_number,
-          description: clean(step.description, "Sin descripcion"),
+          description: clean(step.description, "Sin descripción"),
           tip: clean(step.tip, ""),
-          time: step.time_minutes != null ? `${fmt(step.time_minutes, 0)} min` : "",
+          time: step.time_minutes != null ? formatMinutes(step.time_minutes) : "",
         })),
       };
     }),
@@ -1143,14 +1289,14 @@ export async function GET(request: NextRequest) {
     <RecipesDocument groups={groups} generatedAt={generatedAt} filterText={filterText} />
   );
   const buffer = await streamToBuffer(stream);
-  const filenameParts = ["fogo-recetario", selectedStatus !== "all" ? selectedStatus : null, searchTerm ? safeFilename(searchTerm) : null]
+  const filenameParts = ["fogo-recetario-publicadas", searchTerm ? safeFilename(searchTerm) : null]
     .filter(Boolean)
     .join("-");
 
   return new Response(buffer, {
     headers: {
       "Content-Type": "application/pdf",
-      "Content-Disposition": `attachment; filename="${filenameParts || "fogo-recetario"}.pdf"`,
+      "Content-Disposition": `attachment; filename="${filenameParts || "fogo-recetario-publicadas"}.pdf"`,
       "Cache-Control": "no-store",
     },
   });

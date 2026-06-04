@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { requireAppAccess } from "@/lib/auth/guard";
 import { checkPermission } from "@/lib/auth/permissions";
+import { formatProductionQuantity, productionUnitName } from "@/features/recipes/recipe-units";
 
 export const dynamic = "force-dynamic";
 
@@ -343,7 +344,6 @@ export default async function RecipeBookPage({
   const requestedAreaId = String(sp.area_id ?? "").trim();
   const requestedRecipeId = String(sp.recipe_id ?? "").trim();
   const requestedQty = Number(String(sp.qty ?? "").trim());
-  const requestedStatus = String(sp.status ?? "").trim().toLowerCase();
   const searchTerm = String(sp.q ?? "").trim();
   const searchNeedle = searchTerm.toLowerCase();
 
@@ -369,11 +369,8 @@ export default async function RecipeBookPage({
     ? (siteFilterIsUnassigned ? UNASSIGNED_SITE_ID : requestedSiteId)
     : (currentSiteId || requestedSiteId);
   const realSelectedSiteId = siteFilterIsUnassigned ? "" : selectedSiteId;
-  const selectedStatus =
-    isManagement && (requestedStatus === "published" || requestedStatus === "draft")
-      ? requestedStatus
-      : "all";
-  const allowedStatuses = isManagement ? ["published", "draft"] : ["published"];
+  const selectedStatus = "published";
+  const allowedStatuses = ["published"];
 
   const [{ data: rpcAreasData }, { data: recipeRowsData }, { data: siteRowsData }] = await Promise.all([
     realSelectedSiteId
@@ -426,7 +423,6 @@ export default async function RecipeBookPage({
     const area = one(recipe.areas);
     const haystack = [
       product?.name,
-      product?.sku,
       areaLabel(area),
       isOwnerScope ? recipeSiteName(recipe) : "",
       statusLabel(recipe.status),
@@ -443,12 +439,7 @@ export default async function RecipeBookPage({
     return selectedSiteId ? recipe.site_id === selectedSiteId : true;
   };
 
-  const recipeMatchesStatus = (recipe: RecipeCardRow) => {
-    if (!isManagement) return isPublishedStatus(recipe.status);
-    if (selectedStatus === "published") return isPublishedStatus(recipe.status);
-    if (selectedStatus === "draft") return isDraftStatus(recipe.status);
-    return isPublishedStatus(recipe.status) || isDraftStatus(recipe.status);
-  };
+  const recipeMatchesStatus = (recipe: RecipeCardRow) => isPublishedStatus(recipe.status);
 
   const searchScopedRecipes = rawRecipes.filter(recipeMatchesSearch);
   const siteScopedRecipesForStatus = searchScopedRecipes.filter(recipeMatchesSite);
@@ -611,16 +602,14 @@ export default async function RecipeBookPage({
             ? "Area"
             : "Todas las areas";
 
-  const baseYield = `${fmt(selectedRecipe?.yield_qty)} ${selectedRecipe?.yield_unit ?? "-"}`;
-  const targetYield = `${fmt(productionQty)} ${selectedRecipe?.yield_unit ?? selectedProduct?.unit ?? "-"}`;
+  const baseYield = selectedRecipe
+    ? formatProductionQuantity(selectedRecipe.yield_qty, selectedRecipe.yield_unit)
+    : "-";
+  const targetYield = selectedRecipe
+    ? formatProductionQuantity(productionQty, selectedRecipe.yield_unit ?? selectedProduct?.unit)
+    : "-";
   const totalMinutes = steps.reduce((acc, step) => acc + Number(step.time_minutes ?? 0), 0);
-  const visibleRecipeTypeText = !isManagement
-    ? "publicadas"
-    : selectedStatus === "draft"
-      ? "borradores"
-      : selectedStatus === "published"
-        ? "publicadas"
-        : "publicadas y borradores";
+  const visibleRecipeTypeText = "publicadas";
   const portionSize = Number(selectedRecipe?.portion_size ?? 0);
   const portionUnit = selectedRecipe?.portion_unit || selectedRecipe?.yield_unit || selectedProduct?.unit || "un";
   const productionPortionCalc = selectedRecipe
@@ -642,7 +631,7 @@ export default async function RecipeBookPage({
   const estimatedPortions = productionPortionCalc.count;
   const portionText =
     estimatedPortions != null
-      ? `${fmt(estimatedPortions, 1)} porciones de ${fmt(portionSize)} ${portionUnit}`
+      ? `${fmt(estimatedPortions, 1)} porciones de ${formatProductionQuantity(portionSize, portionUnit)}`
       : "Porciones sin configurar";
   const basePortionText =
     basePortionCalc.count != null ? `${fmt(basePortionCalc.count, 1)} porciones base` : "Porcion pendiente";
@@ -731,11 +720,11 @@ export default async function RecipeBookPage({
             </div>
             <div className="mt-2 flex flex-wrap gap-1.5">
               <span className="inline-flex rounded-full bg-[#FFF7ED] px-2.5 py-1 text-xs font-semibold text-[#C2410C]">
-                {fmt(recipe.yield_qty)} {recipe.yield_unit}
+                {formatProductionQuantity(recipe.yield_qty, recipe.yield_unit)}
               </span>
               {recipe.portion_size ? (
                 <span className="inline-flex rounded-full bg-[#FFFBF5] px-2.5 py-1 text-xs font-semibold text-[#9A3412]">
-                  {fmt(recipe.portion_size)} {recipe.portion_unit ?? recipe.yield_unit}/porc.
+                  {formatProductionQuantity(recipe.portion_size, recipe.portion_unit ?? recipe.yield_unit)}/porc.
                 </span>
               ) : null}
               {isManagement && isDraft ? (
@@ -850,13 +839,12 @@ export default async function RecipeBookPage({
               <form className="mt-3 space-y-3">
                 {selectedSiteId ? <input type="hidden" name="site_id" value={selectedSiteId} /> : null}
                 {selectedAreaId ? <input type="hidden" name="area_id" value={selectedAreaId} /> : null}
-                {selectedStatus !== "all" ? <input type="hidden" name="status" value={selectedStatus} /> : null}
                 {searchTerm ? <input type="hidden" name="q" value={searchTerm} /> : null}
                 <input type="hidden" name="recipe_id" value={selectedRecipe.id} />
 
                 <label>
                   <span className="ui-label">
-                    Cantidad a preparar ({selectedRecipe.yield_unit ?? selectedProduct?.unit ?? "un"})
+                    Cantidad a preparar ({productionUnitName(selectedRecipe.yield_unit ?? selectedProduct?.unit, productionQty)})
                   </span>
                   <input
                     className="ui-input mt-1 bg-white text-2xl font-semibold"
@@ -928,7 +916,7 @@ export default async function RecipeBookPage({
           ) : null}
         </div>
 
-        <form className="mt-4 grid gap-3 lg:grid-cols-[1.2fr_1.2fr_1fr_minmax(180px,1fr)_auto_auto]">
+        <form className="mt-4 grid gap-3 lg:grid-cols-[1.2fr_1.2fr_minmax(220px,1fr)_auto_auto]">
           {isOwnerScope ? (
             <label>
               <span className="ui-label">Sede</span>
@@ -970,27 +958,13 @@ export default async function RecipeBookPage({
             </label>
           ) : null}
 
-          {isManagement ? (
-            <label>
-              <span className="ui-label">Estado</span>
-              <select name="status" defaultValue={selectedStatus} className="ui-input mt-1 bg-white">
-                <option value="all">Todas ({siteScopedRecipesForStatus.length})</option>
-                <option value="published">
-                  Publicadas ({siteScopedRecipesForStatus.filter((recipe) => isPublishedStatus(recipe.status)).length})
-                </option>
-                <option value="draft">
-                  Borradores ({siteScopedRecipesForStatus.filter((recipe) => isDraftStatus(recipe.status)).length})
-                </option>
-              </select>
-            </label>
-          ) : null}
 
           <label>
             <span className="ui-label">Buscar</span>
             <input
               className="ui-input mt-1 bg-white"
               name="q"
-              placeholder="Nombre, SKU, area..."
+              placeholder="Nombre o área..."
               defaultValue={searchTerm}
             />
           </label>
@@ -1084,15 +1058,17 @@ export default async function RecipeBookPage({
                   <div className="mt-1 text-xs text-[var(--ui-muted)]">{difficultyLabel(selectedRecipe.difficulty)}</div>
                 </div>
                 <div className="rounded-3xl border border-[var(--ui-border)] bg-[#FBFCFD] p-4">
-                  <div className="text-xs font-semibold uppercase text-[var(--ui-muted)]">Estado</div>
-                  <div className="mt-1 text-2xl font-semibold text-[var(--ui-text)]">{statusLabel(selectedRecipe.status)}</div>
-                  <div className="mt-1 text-xs text-[var(--ui-muted)]">{selectedRecipeIsPublished ? "Lista para producir" : "Solo revision"}</div>
+                  <div className="text-xs font-semibold uppercase text-[var(--ui-muted)]">Vida útil</div>
+                  <div className="mt-1 text-2xl font-semibold text-[var(--ui-text)]">
+                    {selectedRecipe.shelf_life_days ? `${fmt(selectedRecipe.shelf_life_days, 0)} días` : "-"}
+                  </div>
+                  <div className="mt-1 text-xs text-[var(--ui-muted)]">{statusLabel(selectedRecipe.status)}</div>
                 </div>
               </div>
 
               {showPortionWarning ? (
                 <div className="mt-4 rounded-2xl border border-[#FED7AA] bg-[#FFF7ED] p-3 text-sm font-semibold leading-6 text-[#C2410C]">
-                  Revisa unidades: el rendimiento esta en {selectedRecipe.yield_unit} y la porcion en {portionUnit}.
+                  Revisa unidades: el rendimiento está en {productionUnitName(selectedRecipe.yield_unit)} y la porción en {productionUnitName(portionUnit)}.
                 </div>
               ) : null}
             </section>
@@ -1135,11 +1111,12 @@ export default async function RecipeBookPage({
                         <div className="line-clamp-2 text-base font-semibold leading-5 text-[var(--ui-text)]">
                           {product?.name ?? "Ingrediente"}
                         </div>
-                        <div className="mt-1 text-xs text-[var(--ui-muted)]">{product?.sku ?? "-"}</div>
+
                       </div>
                       <div className="text-right">
-                        <div className="text-2xl font-semibold text-[var(--ui-text)]">{fmt(requiredQty, 3)}</div>
-                        <div className="text-xs font-semibold text-[#C2410C]">{unit}</div>
+                        <div className="text-2xl font-semibold text-[var(--ui-text)]">
+                          {formatProductionQuantity(requiredQty, unit)}
+                        </div>
                       </div>
                     </div>
                   );

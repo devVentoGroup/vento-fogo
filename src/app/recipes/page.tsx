@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { requireAppAccess } from "@/lib/auth/guard";
+import { RecipesPdfLink } from "@/features/recipes/recipes-pdf-actions";
 
 export const dynamic = "force-dynamic";
 
@@ -156,6 +157,21 @@ function recipesHref(params: {
   if (params.q) qs.set("q", params.q);
   const query = qs.toString();
   return query ? `/recipes?${query}` : "/recipes";
+}
+
+function recipesPdfHref(params: {
+  siteId?: string | null;
+  areaId?: string | null;
+  status?: string | null;
+  q?: string | null;
+}) {
+  const qs = new URLSearchParams();
+  if (params.siteId) qs.set("site_id", params.siteId);
+  if (params.areaId) qs.set("area_id", params.areaId);
+  if (params.status && params.status !== "all") qs.set("status", params.status);
+  if (params.q) qs.set("q", params.q);
+  const query = qs.toString();
+  return query ? `/recipes/pdf?${query}` : "/recipes/pdf";
 }
 
 export default async function RecipesAdminPage({
@@ -319,6 +335,14 @@ export default async function RecipesAdminPage({
             <Link href="/recipe-book" className="ui-btn ui-btn--ghost ui-btn--sm">
               Ver libro operacional
             </Link>
+            <RecipesPdfLink
+              href={recipesPdfHref({
+                siteId: requestedSiteId,
+                areaId: requestedAreaId,
+                status: selectedStatus,
+                q: searchTerm,
+              })}
+            />
             <Link href={newRecipeHref({ siteId: requestedSiteId, areaId: requestedAreaId })} className="ui-btn ui-btn--brand ui-btn--sm">
               Nueva receta
             </Link>

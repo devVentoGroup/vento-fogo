@@ -4,11 +4,15 @@ import { useCallback, useState } from "react";
 
 export type RecipeStepLine = {
   id?: string;
+  client_key?: string;
   step_number: number;
   description: string;
   tip: string;
   time_minutes: number | undefined;
+  step_image_path?: string;
   step_image_url?: string;
+  pending_image_name?: string;
+  remove_image?: boolean;
   _delete?: boolean;
 };
 
@@ -17,12 +21,35 @@ type Props = {
   initialRows: RecipeStepLine[];
 };
 
-const emptyStep = (num: number): RecipeStepLine => ({
+function newClientKey() {
+  return `tmp-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function withClientKey(step: RecipeStepLine, index: number): RecipeStepLine {
+  const imagePath = String(step.step_image_path ?? step.step_image_url ?? "").trim();
+
+  return {
+    ...step,
+    client_key:
+      step.client_key ??
+      (step.id ? `existing-${step.id}` : `initial-${index + 1}-${step.step_number}`),
+    step_image_path: imagePath,
+    step_image_url: imagePath,
+    pending_image_name: "",
+    remove_image: step.remove_image === true,
+  };
+}
+
+const emptyStep = (num: number, clientKey = `new-step-${num}`): RecipeStepLine => ({
+  client_key: clientKey,
   step_number: num,
   description: "",
   tip: "",
   time_minutes: undefined,
+  step_image_path: "",
   step_image_url: "",
+  pending_image_name: "",
+  remove_image: false,
 });
 
 export function RecipeStepsEditor({
@@ -30,7 +57,7 @@ export function RecipeStepsEditor({
   initialRows,
 }: Props) {
   const [steps, setSteps] = useState<RecipeStepLine[]>(
-    initialRows.length ? initialRows : [emptyStep(1)]
+    initialRows.length ? initialRows.map(withClientKey) : [emptyStep(1)]
   );
 
   const visibleSteps = steps.filter((s) => !s._delete);
@@ -41,7 +68,7 @@ export function RecipeStepsEditor({
 
   const addStep = useCallback(() => {
     const maxNum = visibleSteps.reduce((m, s) => Math.max(m, s.step_number), 0);
-    setSteps((prev) => [...prev, emptyStep(maxNum + 1)]);
+    setSteps((prev) => [...prev, emptyStep(maxNum + 1, newClientKey())]);
   }, [visibleSteps]);
 
   const removeStep = useCallback((index: number) => {
@@ -90,8 +117,10 @@ export function RecipeStepsEditor({
         {sortedVisible.map((step) => {
           const realIndex = steps.findIndex((s) => s === step);
           const visIndex = sortedVisible.indexOf(step);
+          const clientKey = step.client_key ?? `step-${step.step_number}`;
+          const hasSavedPhoto = Boolean(step.step_image_path && !step.remove_image);
           return (
-            <div key={step.id ?? `step-${step.step_number}`} className="ui-panel-soft p-4 space-y-3">
+            <div key={clientKey} className="ui-panel-soft p-4 space-y-3">
               <div className="flex items-center justify-between gap-3">
                 <span className="ui-h3">Paso {step.step_number}</span>
                 <div className="flex gap-1">
@@ -142,7 +171,7 @@ export function RecipeStepsEditor({
                     value={step.tip}
                     onChange={(e) => updateStep(realIndex, { tip: e.target.value })}
                     className="ui-input"
-                    placeholder="Consejo opcional"
+                    placeholder="Consejo operativo para quien prepara la receta"
                   />
                 </label>
                 <label className="flex flex-col gap-1">
@@ -163,16 +192,50 @@ export function RecipeStepsEditor({
               </div>
 
               <div className="grid gap-3 sm:grid-cols-1">
-                <label className="flex flex-col gap-1">
-                  <span className="ui-caption font-semibold">Foto del paso (URL)</span>
+                <div className="flex flex-col gap-2">
+                  <span className="ui-caption font-semibold">Foto del paso</span>
                   <input
-                    type="url"
-                    value={step.step_image_url ?? ""}
-                    onChange={(e) => updateStep(realIndex, { step_image_url: e.target.value })}
+                    type="file"
+                    name={`recipe_step_image_${clientKey}`}
+                    accept="image/jpeg,image/png,image/webp"
                     className="ui-input"
-                    placeholder="https://..."
+                    onChange={(e) => {
+                      const file = e.target.files?.[0] ?? null;
+                      updateStep(realIndex, {
+                        pending_image_name: file?.name ?? "",
+                        remove_image: file ? false : step.remove_image,
+                      });
+                    }}
                   />
-                </label>
+                  <div className="space-y-1 text-xs text-[var(--ui-muted)]">
+                    {hasSavedPhoto ? (
+                      <p>Esta receta ya tiene una foto guardada para este paso.</p>
+                    ) : null}
+                    {step.pending_image_name ? (
+                      <p>Nueva foto seleccionada: {step.pending_image_name}</p>
+                    ) : null}
+                    {step.remove_image ? (
+                      <p>La foto guardada se eliminara cuando guardes la receta.</p>
+                    ) : null}
+                    <p>Formatos permitidos: JPG, PNG o WEBP. Maximo recomendado: 8 MB.</p>
+                  </div>
+                  {hasSavedPhoto ? (
+                    <div>
+                      <button
+                        type="button"
+                        className="ui-btn ui-btn--ghost ui-btn--sm"
+                        onClick={() =>
+                          updateStep(realIndex, {
+                            remove_image: true,
+                            pending_image_name: "",
+                          })
+                        }
+                      >
+                        Quitar foto guardada
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
               </div>
             </div>
           );

@@ -335,10 +335,11 @@ const styles = StyleSheet.create({
     fontFamily: "Helvetica",
   },
   coverSheet: {
+    position: "relative",
     flexGrow: 1,
     paddingTop: 28,
     paddingRight: 30,
-    paddingBottom: 26,
+    paddingBottom: 70,
     paddingLeft: 30,
     borderWidth: 1,
     borderColor: "#EBCDB4",
@@ -491,13 +492,35 @@ const styles = StyleSheet.create({
   coverMetricWide: {
     flexBasis: 196,
   },
+  coverWatermark: {
+    position: "absolute",
+    right: 28,
+    bottom: 88,
+    width: 235,
+    height: 68,
+    objectFit: "contain",
+    opacity: 0.075,
+  },
   coverFooterStrip: {
-    marginTop: 120,
+    position: "absolute",
+    left: 30,
+    right: 30,
+    bottom: 24,
     paddingTop: 10,
     borderTopWidth: 1,
     borderTopColor: "#EAD7C6",
     flexDirection: "row",
     justifyContent: "space-between",
+    alignItems: "center",
+    color: "#8B7767",
+    fontSize: 7.4,
+  },
+  coverFooterLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+  },
+  coverFooterText: {
     color: "#8B7767",
     fontSize: 7.4,
   },
@@ -560,6 +583,11 @@ const styles = StyleSheet.create({
   ventoLogoSmall: {
     width: 72,
     height: 20,
+    objectFit: "contain",
+  },
+  ventoLogoFooter: {
+    width: 86,
+    height: 22,
     objectFit: "contain",
   },
   docTitle: {
@@ -963,6 +991,16 @@ const styles = StyleSheet.create({
     color: "#8B7767",
     fontSize: 6.8,
   },
+  footerLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  footerLogo: {
+    width: 62,
+    height: 16,
+    objectFit: "contain",
+  },
   footerBrand: {
     color: "#C2410C",
     fontFamily: "Helvetica-Bold",
@@ -997,7 +1035,10 @@ function BrandLockup({ compact = false }: { compact?: boolean }) {
 function Footer({ generatedAt }: { generatedAt: string }) {
   return (
     <View style={styles.footer} fixed>
-      <Text style={styles.footerBrand}>FOGO | VENTO GROUP | USO INTERNO</Text>
+      <View style={styles.footerLeft}>
+        <Image src={VENTO_GROUP_LOGO_SRC} style={styles.footerLogo} />
+        <Text style={styles.footerBrand}>USO INTERNO | FOGO</Text>
+      </View>
       <Text render={({ pageNumber, totalPages }) => `${generatedAt} | Pag. ${pageNumber} de ${totalPages}`} />
     </View>
   );
@@ -1124,6 +1165,7 @@ function CoverPage({
   return (
     <Page size="A4" style={styles.coverPage}>
       <View style={styles.coverSheet}>
+        <Image src={VENTO_GROUP_LOGO_SRC} style={styles.coverWatermark} />
         <View style={styles.coverTop}>
           <BrandLockup />
           <View style={{ alignItems: "flex-end", gap: 8 }}>
@@ -1166,8 +1208,11 @@ function CoverPage({
         </View>
 
         <View style={styles.coverFooterStrip}>
-          <Text>FOGO - Vento OS</Text>
-          <Text>Vento Group - Producción</Text>
+          <View style={styles.coverFooterLeft}>
+            <Image src={FOGO_LOGO_SRC} style={styles.fogoLogoSmall} />
+            <Text style={styles.coverFooterText}>Uso interno · Recetario de producción · Vento OS</Text>
+          </View>
+          <Image src={VENTO_GROUP_LOGO_SRC} style={styles.ventoLogoFooter} />
         </View>
       </View>
     </Page>

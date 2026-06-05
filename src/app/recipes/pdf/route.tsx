@@ -506,14 +506,17 @@ const styles = StyleSheet.create({
     left: 30,
     right: 30,
     bottom: 24,
-    paddingTop: 10,
+    paddingTop: 12,
     borderTopWidth: 1,
     borderTopColor: "#EAD7C6",
     flexDirection: "row",
-    justifyContent: "space-between",
+    justifyContent: "center",
     alignItems: "center",
-    color: "#8B7767",
-    fontSize: 7.4,
+  },
+  coverFooterCenteredLogo: {
+    width: 122,
+    height: 34,
+    objectFit: "contain",
   },
   coverFooterLeft: {
     flexDirection: "row",
@@ -1032,14 +1035,13 @@ function BrandLockup({ compact = false }: { compact?: boolean }) {
   );
 }
 
-function Footer({ generatedAt }: { generatedAt: string }) {
+function Footer({ generatedAt: _generatedAt }: { generatedAt: string }) {
   return (
     <View style={styles.footer} fixed>
       <View style={styles.footerLeft}>
         <Image src={VENTO_GROUP_LOGO_SRC} style={styles.footerLogo} />
-        <Text style={styles.footerBrand}>USO INTERNO | FOGO</Text>
       </View>
-      <Text render={({ pageNumber, totalPages }) => `${generatedAt} | Pag. ${pageNumber} de ${totalPages}`} />
+      <Text render={({ pageNumber, totalPages }) => `Página ${pageNumber} de ${totalPages}`} />
     </View>
   );
 }
@@ -1165,7 +1167,6 @@ function CoverPage({
   return (
     <Page size="A4" style={styles.coverPage}>
       <View style={styles.coverSheet}>
-        <Image src={VENTO_GROUP_LOGO_SRC} style={styles.coverWatermark} />
         <View style={styles.coverTop}>
           <BrandLockup />
           <View style={{ alignItems: "flex-end", gap: 8 }}>
@@ -1208,11 +1209,7 @@ function CoverPage({
         </View>
 
         <View style={styles.coverFooterStrip}>
-          <View style={styles.coverFooterLeft}>
-            <Image src={FOGO_LOGO_SRC} style={styles.fogoLogoSmall} />
-            <Text style={styles.coverFooterText}>Uso interno · Recetario de producción · Vento OS</Text>
-          </View>
-          <Image src={VENTO_GROUP_LOGO_SRC} style={styles.ventoLogoFooter} />
+          <Image src={VENTO_GROUP_LOGO_SRC} style={styles.coverFooterCenteredLogo} />
         </View>
       </View>
     </Page>

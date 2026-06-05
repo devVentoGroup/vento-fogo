@@ -2,12 +2,15 @@ import { NextRequest } from "next/server";
 import {
   Document,
   Font,
+  Image,
   Page,
   StyleSheet,
   Text,
   View,
   renderToStream,
 } from "@react-pdf/renderer";
+
+import path from "node:path";
 
 import { requireAppAccess } from "@/lib/auth/guard";
 
@@ -18,6 +21,9 @@ const APP_ID = "fogo";
 const UNASSIGNED_SITE_ID = "__sin_sede__";
 const UNASSIGNED_AREA_ID = "__sin_area__";
 const PUBLISHED_STATUS = "published";
+const LOGO_DIR = path.join(process.cwd(), "public", "logos");
+const FOGO_LOGO_SRC = path.join(LOGO_DIR, "fogo.svg");
+const VENTO_GROUP_LOGO_SRC = path.join(LOGO_DIR, "vento-group.svg");
 
 Font.registerHyphenationCallback((word) => [word]);
 
@@ -536,6 +542,26 @@ const styles = StyleSheet.create({
     fontFamily: "Helvetica-Bold",
     fontSize: 7.5,
   },
+  fogoLogoLarge: {
+    width: 30,
+    height: 38,
+    objectFit: "contain",
+  },
+  fogoLogoSmall: {
+    width: 18,
+    height: 23,
+    objectFit: "contain",
+  },
+  ventoLogoLarge: {
+    width: 118,
+    height: 34,
+    objectFit: "contain",
+  },
+  ventoLogoSmall: {
+    width: 72,
+    height: 20,
+    objectFit: "contain",
+  },
   docTitle: {
     fontSize: 7.2,
     letterSpacing: 1.5,
@@ -753,10 +779,10 @@ const styles = StyleSheet.create({
     minHeight: 34,
   },
   sectionBlock: {
-    marginTop: 7,
+    marginTop: 5,
   },
   sectionHeader: {
-    marginBottom: 5,
+    marginBottom: 4,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
@@ -786,7 +812,7 @@ const styles = StyleSheet.create({
   table: {
     borderWidth: 1,
     borderColor: "#EAD7C6",
-    borderRadius: 11,
+    borderRadius: 8,
     overflow: "hidden",
   },
   tableHeader: {
@@ -802,18 +828,19 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
   },
   tableCell: {
-    paddingTop: 5.5,
-    paddingRight: 7,
-    paddingBottom: 5.5,
-    paddingLeft: 7,
-    fontSize: 7.7,
+    paddingTop: 3.2,
+    paddingRight: 6,
+    paddingBottom: 3.2,
+    paddingLeft: 6,
+    fontSize: 7.1,
+    lineHeight: 1.08,
   },
   tableHeadCell: {
-    paddingTop: 5.5,
-    paddingRight: 7,
-    paddingBottom: 5.5,
-    paddingLeft: 7,
-    fontSize: 6.4,
+    paddingTop: 3.6,
+    paddingRight: 6,
+    paddingBottom: 3.6,
+    paddingLeft: 6,
+    fontSize: 5.9,
     letterSpacing: 0.8,
     textTransform: "uppercase",
     color: "#C2410C",
@@ -829,20 +856,21 @@ const styles = StyleSheet.create({
     textAlign: "right",
   },
   stepsGrid: {
-    gap: 6,
+    gap: 5,
   },
   stepRow: {
     flexDirection: "row",
-    gap: 6,
+    gap: 5,
+    marginBottom: 5,
   },
   stepColumn: {
     width: "50%",
   },
   stepCard: {
-    paddingTop: 7,
-    paddingRight: 8,
-    paddingBottom: 7,
-    paddingLeft: 8,
+    paddingTop: 6,
+    paddingRight: 7,
+    paddingBottom: 6,
+    paddingLeft: 7,
     borderWidth: 1,
     borderColor: "#EAD7C6",
     borderRadius: 11,
@@ -853,7 +881,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     gap: 5,
-    marginBottom: 5,
+    marginBottom: 4,
   },
   stepIdentity: {
     flexDirection: "row",
@@ -893,23 +921,23 @@ const styles = StyleSheet.create({
     fontFamily: "Helvetica-Bold",
   },
   stepText: {
-    fontSize: 7.7,
-    lineHeight: 1.24,
+    fontSize: 7.25,
+    lineHeight: 1.18,
     color: "#201A16",
   },
   stepTip: {
-    marginTop: 5,
-    paddingTop: 5,
-    paddingRight: 6,
-    paddingBottom: 5,
-    paddingLeft: 6,
+    marginTop: 4,
+    paddingTop: 4,
+    paddingRight: 5,
+    paddingBottom: 4,
+    paddingLeft: 5,
     borderLeftWidth: 2,
     borderLeftColor: "#F97316",
     borderRadius: 7,
     backgroundColor: "#FFF4EA",
     color: "#9A3412",
-    fontSize: 6.9,
-    lineHeight: 1.22,
+    fontSize: 6.5,
+    lineHeight: 1.16,
   },
   emptyBox: {
     padding: 10,
@@ -946,9 +974,7 @@ function BrandLockup({ compact = false }: { compact?: boolean }) {
   if (compact) {
     return (
       <View style={styles.headerBrand}>
-        <View style={styles.headerLogoSmall}>
-          <Text style={styles.headerLogoSmallText}>FG</Text>
-        </View>
+        <Image src={FOGO_LOGO_SRC} style={styles.fogoLogoSmall} />
         <View>
           <Text style={styles.docTitle}>FOGO</Text>
           <Text style={[styles.muted, { fontSize: 6.6, marginTop: 1 }]}>Vento Group</Text>
@@ -959,9 +985,7 @@ function BrandLockup({ compact = false }: { compact?: boolean }) {
 
   return (
     <View style={styles.coverBrandCluster}>
-      <View style={styles.logoSeal}>
-        <Text style={styles.logoSealText}>FG</Text>
-      </View>
+      <Image src={FOGO_LOGO_SRC} style={styles.fogoLogoLarge} />
       <View style={styles.brandStack}>
         <Text style={styles.brandEyebrow}>Vento Group</Text>
         <Text style={styles.brandProduct}>FOGO</Text>
@@ -987,7 +1011,7 @@ function TopBar({ title, meta }: { title: string; meta: string }) {
   return (
     <View style={styles.topBar} fixed>
       <BrandLockup compact />
-      <View>
+      <View style={{ alignItems: "flex-end" }}>
         <Text style={[styles.docTitle, { textAlign: "right" }]}>{title}</Text>
         <Text style={styles.docMeta}>{meta}</Text>
       </View>
@@ -1028,7 +1052,7 @@ function InfoCard({ label, value }: { label: string; value: string }) {
 function IngredientsTable({ ingredients }: { ingredients: PreparedIngredient[] }) {
   return (
     <View style={styles.table}>
-      <View style={styles.tableHeader} fixed>
+      <View style={styles.tableHeader} wrap={false}>
         <Text style={[styles.tableHeadCell, { width: "68%" }]}>Ingrediente</Text>
         <Text style={[styles.tableHeadCell, { width: "32%", textAlign: "right" }]}>Cantidad</Text>
       </View>
@@ -1061,10 +1085,10 @@ function StepsList({ steps }: { steps: PreparedStep[] }) {
   return (
     <View style={styles.stepsGrid}>
       {rows.map((row, rowIndex) => (
-        <View key={`step-row-${rowIndex}`} style={styles.stepRow}>
+        <View key={`step-row-${rowIndex}`} style={styles.stepRow} wrap={false}>
           {row.map((step) => (
             <View key={`${step.number}-${step.description}`} style={styles.stepColumn}>
-              <View style={styles.stepCard} wrap={false}>
+              <View style={styles.stepCard}>
                 <View style={styles.stepHeader}>
                   <View style={styles.stepIdentity}>
                     <View style={styles.stepNumber}>
@@ -1103,7 +1127,7 @@ function CoverPage({
         <View style={styles.coverTop}>
           <BrandLockup />
           <View style={{ alignItems: "flex-end", gap: 8 }}>
-            <Text style={styles.ventoWordmark}>VENTO GROUP</Text>
+            <Image src={VENTO_GROUP_LOGO_SRC} style={styles.ventoLogoLarge} />
             <Text style={styles.internalBadge}>Uso interno</Text>
           </View>
         </View>

@@ -309,88 +309,110 @@ function safeFilename(value: string) {
 
 const styles = StyleSheet.create({
   page: {
-    paddingTop: 34,
-    paddingRight: 38,
-    paddingBottom: 42,
-    paddingLeft: 38,
-    backgroundColor: "#FFFDF9",
-    color: "#211B17",
+    paddingTop: 28,
+    paddingRight: 30,
+    paddingBottom: 38,
+    paddingLeft: 30,
+    backgroundColor: "#FFFCF7",
+    color: "#201A16",
     fontFamily: "Helvetica",
-    fontSize: 9,
-    lineHeight: 1.34,
+    fontSize: 8.4,
+    lineHeight: 1.28,
   },
   coverPage: {
-    paddingTop: 44,
-    paddingRight: 44,
-    paddingBottom: 44,
-    paddingLeft: 44,
-    backgroundColor: "#F7F0E8",
-    color: "#211B17",
-    fontFamily: "Helvetica",
-  },
-  coverFrame: {
-    flexGrow: 1,
     paddingTop: 34,
     paddingRight: 34,
-    paddingBottom: 30,
+    paddingBottom: 34,
     paddingLeft: 34,
-    borderWidth: 1,
-    borderColor: "#E5D2C0",
-    borderRadius: 26,
-    backgroundColor: "#FFFDF9",
+    backgroundColor: "#F8EFE5",
+    color: "#201A16",
+    fontFamily: "Helvetica",
   },
-  coverBrandRow: {
+  coverSheet: {
+    flexGrow: 1,
+    paddingTop: 28,
+    paddingRight: 30,
+    paddingBottom: 26,
+    paddingLeft: 30,
+    borderWidth: 1,
+    borderColor: "#EBCDB4",
+    borderRadius: 22,
+    backgroundColor: "#FFFCF7",
+  },
+  coverTop: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
   },
-  markRow: {
+  coverBrandCluster: {
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
   },
-  logoMark: {
-    width: 42,
-    height: 42,
-    borderRadius: 12,
+  logoSeal: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
     backgroundColor: "#F97316",
-    color: "#FFFFFF",
     alignItems: "center",
     justifyContent: "center",
   },
-  logoText: {
-    fontSize: 14,
+  logoSealText: {
+    color: "#FFFFFF",
     fontFamily: "Helvetica-Bold",
+    fontSize: 14,
+    letterSpacing: 0.6,
   },
-  brandName: {
-    fontSize: 8,
+  brandStack: {
+    gap: 2,
+  },
+  brandEyebrow: {
+    fontSize: 7,
     letterSpacing: 2.2,
     textTransform: "uppercase",
-    color: "#8A7465",
+    color: "#9A4A16",
     fontFamily: "Helvetica-Bold",
   },
-  internalTag: {
-    paddingTop: 6,
-    paddingRight: 10,
-    paddingBottom: 6,
-    paddingLeft: 10,
+  brandProduct: {
+    fontSize: 16,
+    letterSpacing: 1.5,
+    textTransform: "uppercase",
+    color: "#201A16",
+    fontFamily: "Helvetica-Bold",
+  },
+  ventoWordmark: {
+    fontSize: 8,
+    letterSpacing: 2.4,
+    textTransform: "uppercase",
+    color: "#6D5A4C",
+    fontFamily: "Helvetica-Bold",
+  },
+  internalBadge: {
+    paddingTop: 5,
+    paddingRight: 9,
+    paddingBottom: 5,
+    paddingLeft: 9,
+    borderWidth: 1,
+    borderColor: "#F97316",
     borderRadius: 999,
-    backgroundColor: "#211B17",
-    color: "#FFF7ED",
-    fontSize: 7,
+    backgroundColor: "#FFF4EA",
+    color: "#C2410C",
+    fontSize: 6.6,
     letterSpacing: 1.1,
     textTransform: "uppercase",
     fontFamily: "Helvetica-Bold",
   },
-  coverRule: {
-    marginTop: 86,
-    width: 82,
-    height: 4,
-    borderRadius: 2,
+  coverAccent: {
+    marginTop: 76,
+    width: 104,
+    height: 5,
+    borderRadius: 999,
     backgroundColor: "#F97316",
   },
-  coverKicker: {
+  coverMain: {
     marginTop: 18,
+  },
+  coverKicker: {
     fontSize: 8,
     letterSpacing: 2.4,
     textTransform: "uppercase",
@@ -398,79 +420,124 @@ const styles = StyleSheet.create({
     fontFamily: "Helvetica-Bold",
   },
   coverTitle: {
-    marginTop: 14,
-    maxWidth: 390,
-    fontSize: 39,
-    lineHeight: 1.02,
-    letterSpacing: -0.7,
+    marginTop: 12,
+    maxWidth: 410,
+    fontSize: 41,
+    lineHeight: 0.98,
+    letterSpacing: -0.9,
     fontFamily: "Helvetica-Bold",
-    color: "#211B17",
+    color: "#201A16",
   },
   coverSubtitle: {
-    marginTop: 18,
-    maxWidth: 386,
-    fontSize: 11.5,
-    lineHeight: 1.52,
-    color: "#5F5148",
+    marginTop: 16,
+    maxWidth: 420,
+    fontSize: 11.2,
+    lineHeight: 1.45,
+    color: "#6D5A4C",
   },
-  coverMetaPanel: {
-    marginTop: 54,
-    paddingTop: 18,
-    paddingRight: 18,
-    paddingBottom: 18,
-    paddingLeft: 18,
+  coverStatsBand: {
+    marginTop: 50,
+    paddingTop: 14,
+    paddingRight: 14,
+    paddingBottom: 14,
+    paddingLeft: 14,
+    borderWidth: 1,
+    borderColor: "#F5CBA8",
     borderRadius: 18,
-    backgroundColor: "#211B17",
-    color: "#FFF7ED",
+    backgroundColor: "#FFF4EA",
   },
-  coverMetaTitle: {
-    fontSize: 8,
-    letterSpacing: 1.4,
+  coverStatsHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 16,
+  },
+  coverStatsTitle: {
+    fontSize: 7,
+    letterSpacing: 1.6,
     textTransform: "uppercase",
-    color: "#FDBA74",
+    color: "#C2410C",
     fontFamily: "Helvetica-Bold",
   },
-  coverMetaValue: {
-    marginTop: 7,
-    fontSize: 18,
+  coverStatsDate: {
+    marginTop: 5,
+    fontSize: 17,
+    lineHeight: 1.05,
     fontFamily: "Helvetica-Bold",
-    color: "#FFFFFF",
+    color: "#201A16",
   },
   coverMetricsRow: {
     marginTop: 14,
     flexDirection: "row",
-    gap: 10,
+    gap: 8,
   },
   coverMetric: {
     flexGrow: 1,
-    padding: 12,
-    borderRadius: 13,
-    backgroundColor: "#FFF7ED",
-    color: "#211B17",
+    paddingTop: 9,
+    paddingRight: 10,
+    paddingBottom: 9,
+    paddingLeft: 10,
+    borderWidth: 1,
+    borderColor: "#F2D2B9",
+    borderRadius: 12,
+    backgroundColor: "#FFFCF7",
+  },
+  coverMetricWide: {
+    flexBasis: 196,
+  },
+  coverFooterStrip: {
+    marginTop: 120,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: "#EAD7C6",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    color: "#8B7767",
+    fontSize: 7.4,
   },
   smallLabel: {
-    fontSize: 7,
-    letterSpacing: 1.1,
+    fontSize: 6.6,
+    letterSpacing: 1.2,
     textTransform: "uppercase",
-    color: "#8A7465",
+    color: "#8B7767",
     fontFamily: "Helvetica-Bold",
   },
   metricNumber: {
     marginTop: 5,
-    fontSize: 18,
+    fontSize: 17,
+    lineHeight: 1.05,
     fontFamily: "Helvetica-Bold",
+    color: "#201A16",
   },
   topBar: {
-    marginBottom: 18,
-    paddingBottom: 10,
+    marginBottom: 12,
+    paddingBottom: 8,
     borderBottomWidth: 1,
-    borderBottomColor: "#EADDD0",
+    borderBottomColor: "#EAD7C6",
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
   },
+  headerBrand: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+  },
+  headerLogoSmall: {
+    width: 24,
+    height: 24,
+    borderRadius: 7,
+    backgroundColor: "#F97316",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  headerLogoSmallText: {
+    color: "#FFFFFF",
+    fontFamily: "Helvetica-Bold",
+    fontSize: 7.5,
+  },
   docTitle: {
-    fontSize: 8,
+    fontSize: 7.2,
     letterSpacing: 1.5,
     textTransform: "uppercase",
     color: "#C2410C",
@@ -478,338 +545,466 @@ const styles = StyleSheet.create({
   },
   docMeta: {
     maxWidth: 250,
-    fontSize: 8,
-    color: "#8A7465",
+    fontSize: 7.2,
+    color: "#8B7767",
     textAlign: "right",
   },
   h1: {
-    fontSize: 27,
-    lineHeight: 1.05,
+    fontSize: 26,
+    lineHeight: 1.02,
+    letterSpacing: -0.3,
     fontFamily: "Helvetica-Bold",
-    color: "#211B17",
-  },
-  h2: {
-    fontSize: 15,
-    lineHeight: 1.15,
-    fontFamily: "Helvetica-Bold",
-    color: "#211B17",
-  },
-  h3: {
-    fontSize: 21,
-    lineHeight: 1.06,
-    fontFamily: "Helvetica-Bold",
-    color: "#211B17",
+    color: "#201A16",
   },
   muted: {
-    color: "#72665D",
+    color: "#6D5A4C",
   },
   indexIntro: {
-    marginTop: 7,
-    marginBottom: 18,
-    fontSize: 10,
-    color: "#72665D",
+    marginTop: 6,
+    marginBottom: 11,
+    fontSize: 9.2,
+    color: "#6D5A4C",
+  },
+  indexSummaryRow: {
+    marginBottom: 12,
+    flexDirection: "row",
+    gap: 7,
+  },
+  indexSummaryCard: {
+    flexGrow: 1,
+    paddingTop: 7,
+    paddingRight: 9,
+    paddingBottom: 7,
+    paddingLeft: 9,
+    borderWidth: 1,
+    borderColor: "#F2D2B9",
+    borderRadius: 10,
+    backgroundColor: "#FFF4EA",
   },
   indexGroup: {
-    marginBottom: 18,
+    marginBottom: 11,
   },
   indexGroupHeader: {
-    marginBottom: 6,
-    paddingTop: 9,
-    paddingRight: 11,
-    paddingBottom: 9,
-    paddingLeft: 11,
+    marginBottom: 5,
+    paddingTop: 8,
+    paddingRight: 10,
+    paddingBottom: 8,
+    paddingLeft: 10,
+    borderWidth: 1,
+    borderColor: "#F2D2B9",
     borderRadius: 12,
-    backgroundColor: "#211B17",
-    color: "#FFF7ED",
+    backgroundColor: "#FFF4EA",
   },
   indexGroupLabel: {
-    fontSize: 7,
-    letterSpacing: 1.2,
+    fontSize: 6.5,
+    letterSpacing: 1.1,
     textTransform: "uppercase",
-    color: "#FDBA74",
+    color: "#C2410C",
     fontFamily: "Helvetica-Bold",
   },
   indexGroupTitle: {
-    marginTop: 4,
-    fontSize: 13,
-    lineHeight: 1.15,
+    marginTop: 3,
+    fontSize: 12.2,
+    lineHeight: 1.12,
     fontFamily: "Helvetica-Bold",
-    color: "#FFFFFF",
+    color: "#201A16",
+  },
+  indexTableHeader: {
+    flexDirection: "row",
+    paddingTop: 5,
+    paddingRight: 2,
+    paddingBottom: 5,
+    paddingLeft: 2,
+    borderBottomWidth: 1,
+    borderBottomColor: "#EAD7C6",
   },
   indexRecipeRow: {
     flexDirection: "row",
     alignItems: "center",
-    paddingTop: 6,
+    paddingTop: 5,
     paddingRight: 2,
-    paddingBottom: 6,
+    paddingBottom: 5,
     paddingLeft: 2,
     borderBottomWidth: 1,
-    borderBottomColor: "#F0E4D9",
+    borderBottomColor: "#F0E1D4",
   },
   indexNumber: {
-    width: 34,
-    fontSize: 8,
+    width: 32,
+    fontSize: 7.4,
     color: "#C2410C",
     fontFamily: "Helvetica-Bold",
   },
   indexRecipeName: {
     flexGrow: 1,
-    fontSize: 9.2,
-    color: "#211B17",
+    fontSize: 8.7,
+    color: "#201A16",
+    fontFamily: "Helvetica-Bold",
+  },
+  indexRecipeArea: {
+    width: 132,
+    fontSize: 7.4,
+    color: "#6D5A4C",
   },
   indexRecipeMeta: {
-    width: 120,
-    fontSize: 8,
-    color: "#8A7465",
+    width: 64,
+    fontSize: 7.4,
+    color: "#8B7767",
     textAlign: "right",
   },
   recipeHero: {
-    marginBottom: 14,
-    paddingTop: 14,
-    paddingRight: 16,
-    paddingBottom: 14,
-    paddingLeft: 16,
-    borderRadius: 16,
-    backgroundColor: "#211B17",
-    color: "#FFF7ED",
+    marginBottom: 9,
+    paddingTop: 10,
+    paddingRight: 12,
+    paddingBottom: 10,
+    paddingLeft: 13,
+    borderWidth: 1,
+    borderLeftWidth: 5,
+    borderColor: "#F2D2B9",
+    borderLeftColor: "#F97316",
+    borderRadius: 14,
+    backgroundColor: "#FFF4EA",
   },
   recipeHeroTop: {
-    marginBottom: 10,
+    marginBottom: 6,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
   },
-  pill: {
-    paddingTop: 4,
-    paddingRight: 8,
-    paddingBottom: 4,
-    paddingLeft: 8,
-    borderRadius: 999,
-    backgroundColor: "#FFF7ED",
+  recipeTitle: {
+    maxWidth: 470,
+    fontSize: 21,
+    lineHeight: 1.02,
+    letterSpacing: -0.25,
+    fontFamily: "Helvetica-Bold",
+    color: "#201A16",
+  },
+  recipeDescription: {
+    marginTop: 5,
+    maxWidth: 470,
+    color: "#6D5A4C",
+    fontSize: 8,
+    lineHeight: 1.28,
+  },
+  recipeLocation: {
+    marginTop: 5,
     color: "#C2410C",
-    fontSize: 7,
-    letterSpacing: 0.6,
+    fontSize: 7.5,
+    fontFamily: "Helvetica-Bold",
+  },
+  pill: {
+    paddingTop: 3.5,
+    paddingRight: 7,
+    paddingBottom: 3.5,
+    paddingLeft: 7,
+    borderWidth: 1,
+    borderColor: "#F2D2B9",
+    borderRadius: 999,
+    backgroundColor: "#FFFCF7",
+    color: "#C2410C",
+    fontSize: 6.5,
+    letterSpacing: 0.7,
     textTransform: "uppercase",
     fontFamily: "Helvetica-Bold",
   },
-  pillDark: {
-    backgroundColor: "#3A2D26",
-    color: "#FDBA74",
-  },
-  recipeTitle: {
-    maxWidth: 470,
-    fontSize: 23,
-    lineHeight: 1.05,
-    letterSpacing: -0.2,
-    fontFamily: "Helvetica-Bold",
+  pillAccent: {
+    backgroundColor: "#F97316",
+    borderColor: "#F97316",
     color: "#FFFFFF",
-  },
-  recipeDescription: {
-    marginTop: 7,
-    maxWidth: 465,
-    color: "#FDEAD6",
-    fontSize: 8.8,
-    lineHeight: 1.35,
-  },
-  recipeLocation: {
-    marginTop: 7,
-    color: "#FDBA74",
-    fontSize: 8,
-    fontFamily: "Helvetica-Bold",
   },
   metricsGrid: {
     flexDirection: "row",
-    gap: 6,
-    marginBottom: 8,
+    gap: 5,
+    marginBottom: 6,
   },
   metricCard: {
     flexGrow: 1,
-    padding: 8,
+    paddingTop: 6,
+    paddingRight: 7,
+    paddingBottom: 6,
+    paddingLeft: 7,
     borderWidth: 1,
-    borderColor: "#EADDD0",
-    borderRadius: 10,
+    borderColor: "#EAD7C6",
+    borderRadius: 9,
     backgroundColor: "#FFFFFF",
-    minHeight: 43,
+    minHeight: 35,
   },
   metricValue: {
-    marginTop: 4,
-    fontSize: 9.4,
-    lineHeight: 1.15,
+    marginTop: 3,
+    fontSize: 8.5,
+    lineHeight: 1.1,
     fontFamily: "Helvetica-Bold",
-    color: "#211B17",
+    color: "#201A16",
   },
   infoGrid: {
     flexDirection: "row",
-    gap: 6,
-    marginBottom: 16,
+    gap: 5,
+    marginBottom: 9,
   },
   infoCard: {
     flexGrow: 1,
-    padding: 8,
+    paddingTop: 6,
+    paddingRight: 7,
+    paddingBottom: 6,
+    paddingLeft: 7,
     borderWidth: 1,
-    borderColor: "#EADDD0",
-    borderRadius: 10,
-    backgroundColor: "#FFFDFC",
+    borderColor: "#EAD7C6",
+    borderRadius: 9,
+    backgroundColor: "#FFFCF7",
+    minHeight: 34,
   },
   sectionBlock: {
-    marginTop: 10,
+    marginTop: 7,
   },
   sectionHeader: {
-    marginBottom: 7,
+    marginBottom: 5,
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "flex-end",
+    alignItems: "center",
+  },
+  sectionTitleGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+  sectionMarker: {
+    width: 18,
+    height: 3,
+    borderRadius: 999,
+    backgroundColor: "#F97316",
   },
   sectionLabel: {
-    fontSize: 8,
+    fontSize: 7.4,
     letterSpacing: 1.1,
     textTransform: "uppercase",
     color: "#C2410C",
     fontFamily: "Helvetica-Bold",
   },
   sectionSubtle: {
-    fontSize: 8,
-    color: "#8A7465",
+    fontSize: 7.2,
+    color: "#8B7767",
   },
   table: {
     borderWidth: 1,
-    borderColor: "#EADDD0",
-    borderRadius: 12,
+    borderColor: "#EAD7C6",
+    borderRadius: 11,
     overflow: "hidden",
   },
   tableHeader: {
     flexDirection: "row",
-    backgroundColor: "#FFF7ED",
+    backgroundColor: "#FFF4EA",
     borderBottomWidth: 1,
-    borderBottomColor: "#EADDD0",
+    borderBottomColor: "#EAD7C6",
   },
   tableRow: {
     flexDirection: "row",
     borderBottomWidth: 1,
-    borderBottomColor: "#F1E5DA",
+    borderBottomColor: "#F3E5D8",
+    backgroundColor: "#FFFFFF",
   },
   tableCell: {
-    paddingTop: 7,
-    paddingRight: 8,
-    paddingBottom: 7,
-    paddingLeft: 8,
-    fontSize: 8,
+    paddingTop: 5.5,
+    paddingRight: 7,
+    paddingBottom: 5.5,
+    paddingLeft: 7,
+    fontSize: 7.7,
   },
   tableHeadCell: {
-    paddingTop: 7,
-    paddingRight: 8,
-    paddingBottom: 7,
-    paddingLeft: 8,
-    fontSize: 6.8,
-    letterSpacing: 0.7,
+    paddingTop: 5.5,
+    paddingRight: 7,
+    paddingBottom: 5.5,
+    paddingLeft: 7,
+    fontSize: 6.4,
+    letterSpacing: 0.8,
     textTransform: "uppercase",
     color: "#C2410C",
     fontFamily: "Helvetica-Bold",
   },
   ingredientName: {
     fontFamily: "Helvetica-Bold",
-    color: "#211B17",
+    color: "#201A16",
   },
   amountText: {
-    color: "#211B17",
+    color: "#201A16",
     fontFamily: "Helvetica-Bold",
     textAlign: "right",
   },
+  stepsGrid: {
+    gap: 6,
+  },
+  stepRow: {
+    flexDirection: "row",
+    gap: 6,
+  },
+  stepColumn: {
+    width: "50%",
+  },
   stepCard: {
-    marginBottom: 7,
-    paddingTop: 9,
-    paddingRight: 10,
-    paddingBottom: 9,
-    paddingLeft: 10,
+    paddingTop: 7,
+    paddingRight: 8,
+    paddingBottom: 7,
+    paddingLeft: 8,
     borderWidth: 1,
-    borderColor: "#EADDD0",
-    borderRadius: 12,
+    borderColor: "#EAD7C6",
+    borderRadius: 11,
     backgroundColor: "#FFFFFF",
   },
   stepHeader: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    marginBottom: 6,
+    justifyContent: "space-between",
+    gap: 5,
+    marginBottom: 5,
+  },
+  stepIdentity: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
   },
   stepNumber: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
     backgroundColor: "#F97316",
     color: "#FFFFFF",
     alignItems: "center",
     justifyContent: "center",
   },
   stepNumberText: {
-    fontSize: 8,
+    fontSize: 7.2,
+    fontFamily: "Helvetica-Bold",
+    color: "#FFFFFF",
+  },
+  stepTitle: {
+    fontSize: 7,
+    letterSpacing: 0.8,
+    textTransform: "uppercase",
+    color: "#C2410C",
     fontFamily: "Helvetica-Bold",
   },
   stepTime: {
-    paddingTop: 3,
-    paddingRight: 7,
-    paddingBottom: 3,
-    paddingLeft: 7,
+    paddingTop: 2.5,
+    paddingRight: 5,
+    paddingBottom: 2.5,
+    paddingLeft: 5,
     borderRadius: 999,
-    backgroundColor: "#FFF7ED",
+    backgroundColor: "#FFF4EA",
     color: "#C2410C",
-    fontSize: 7,
+    fontSize: 6.4,
     fontFamily: "Helvetica-Bold",
   },
   stepText: {
-    fontSize: 8.4,
-    lineHeight: 1.33,
-    color: "#211B17",
+    fontSize: 7.7,
+    lineHeight: 1.24,
+    color: "#201A16",
   },
   stepTip: {
-    marginTop: 6,
-    paddingTop: 6,
-    paddingRight: 7,
-    paddingBottom: 6,
-    paddingLeft: 7,
-    borderLeftWidth: 3,
+    marginTop: 5,
+    paddingTop: 5,
+    paddingRight: 6,
+    paddingBottom: 5,
+    paddingLeft: 6,
+    borderLeftWidth: 2,
     borderLeftColor: "#F97316",
     borderRadius: 7,
-    backgroundColor: "#FFF7ED",
+    backgroundColor: "#FFF4EA",
     color: "#9A3412",
-    fontSize: 7.6,
-    lineHeight: 1.28,
+    fontSize: 6.9,
+    lineHeight: 1.22,
   },
   emptyBox: {
-    padding: 12,
+    padding: 10,
     borderWidth: 1,
-    borderColor: "#EADDD0",
-    borderRadius: 12,
-    color: "#72665D",
+    borderColor: "#EAD7C6",
+    borderRadius: 11,
+    backgroundColor: "#FFFFFF",
+    color: "#6D5A4C",
     textAlign: "center",
-    fontSize: 8,
+    fontSize: 7.8,
   },
   footer: {
     position: "absolute",
-    left: 38,
-    right: 38,
-    bottom: 18,
-    paddingTop: 7,
+    left: 30,
+    right: 30,
+    bottom: 16,
+    paddingTop: 6,
     borderTopWidth: 1,
-    borderTopColor: "#EADDD0",
+    borderTopColor: "#EAD7C6",
     flexDirection: "row",
     justifyContent: "space-between",
-    color: "#8A7465",
-    fontSize: 7,
+    alignItems: "center",
+    color: "#8B7767",
+    fontSize: 6.8,
+  },
+  footerBrand: {
+    color: "#C2410C",
+    fontFamily: "Helvetica-Bold",
+    letterSpacing: 0.5,
   },
 });
 
-function Footer({ generatedAt }: { generatedAt: string }) {
+function BrandLockup({ compact = false }: { compact?: boolean }) {
+  if (compact) {
+    return (
+      <View style={styles.headerBrand}>
+        <View style={styles.headerLogoSmall}>
+          <Text style={styles.headerLogoSmallText}>FG</Text>
+        </View>
+        <View>
+          <Text style={styles.docTitle}>FOGO</Text>
+          <Text style={[styles.muted, { fontSize: 6.6, marginTop: 1 }]}>Vento Group</Text>
+        </View>
+      </View>
+    );
+  }
+
   return (
-    <View style={styles.footer} fixed>
-      <Text>FOGO | Vento Group | Documento interno</Text>
-      <Text render={({ pageNumber, totalPages }) => `${generatedAt} | Página ${pageNumber} de ${totalPages}`} />
+    <View style={styles.coverBrandCluster}>
+      <View style={styles.logoSeal}>
+        <Text style={styles.logoSealText}>FG</Text>
+      </View>
+      <View style={styles.brandStack}>
+        <Text style={styles.brandEyebrow}>Vento Group</Text>
+        <Text style={styles.brandProduct}>FOGO</Text>
+      </View>
     </View>
   );
 }
 
-function StatusPill({ label, tone = "light" }: { label: string; tone?: "light" | "dark" }) {
-  return <Text style={tone === "dark" ? [styles.pill, styles.pillDark] : styles.pill}>{label}</Text>;
+function Footer({ generatedAt }: { generatedAt: string }) {
+  return (
+    <View style={styles.footer} fixed>
+      <Text style={styles.footerBrand}>FOGO | VENTO GROUP | USO INTERNO</Text>
+      <Text render={({ pageNumber, totalPages }) => `${generatedAt} | Pag. ${pageNumber} de ${totalPages}`} />
+    </View>
+  );
+}
+
+function StatusPill({ label, tone = "light" }: { label: string; tone?: "light" | "accent" }) {
+  return <Text style={tone === "accent" ? [styles.pill, styles.pillAccent] : styles.pill}>{label}</Text>;
+}
+
+function TopBar({ title, meta }: { title: string; meta: string }) {
+  return (
+    <View style={styles.topBar} fixed>
+      <BrandLockup compact />
+      <View>
+        <Text style={[styles.docTitle, { textAlign: "right" }]}>{title}</Text>
+        <Text style={styles.docMeta}>{meta}</Text>
+      </View>
+    </View>
+  );
+}
+
+function SectionHeader({ label, meta }: { label: string; meta: string }) {
+  return (
+    <View style={styles.sectionHeader} wrap={false}>
+      <View style={styles.sectionTitleGroup}>
+        <View style={styles.sectionMarker} />
+        <Text style={styles.sectionLabel}>{label}</Text>
+      </View>
+      <Text style={styles.sectionSubtle}>{meta}</Text>
+    </View>
+  );
 }
 
 function Metric({ label, value }: { label: string; value: string }) {
@@ -858,18 +1053,33 @@ function StepsList({ steps }: { steps: PreparedStep[] }) {
     return <Text style={styles.emptyBox}>Sin pasos guardados.</Text>;
   }
 
+  const rows: PreparedStep[][] = [];
+  for (let index = 0; index < steps.length; index += 2) {
+    rows.push(steps.slice(index, index + 2));
+  }
+
   return (
-    <View>
-      {steps.map((step) => (
-        <View key={`${step.number}-${step.description}`} style={styles.stepCard} wrap={false}>
-          <View style={styles.stepHeader}>
-            <View style={styles.stepNumber}>
-              <Text style={styles.stepNumberText}>{step.number}</Text>
+    <View style={styles.stepsGrid}>
+      {rows.map((row, rowIndex) => (
+        <View key={`step-row-${rowIndex}`} style={styles.stepRow}>
+          {row.map((step) => (
+            <View key={`${step.number}-${step.description}`} style={styles.stepColumn}>
+              <View style={styles.stepCard} wrap={false}>
+                <View style={styles.stepHeader}>
+                  <View style={styles.stepIdentity}>
+                    <View style={styles.stepNumber}>
+                      <Text style={styles.stepNumberText}>{step.number}</Text>
+                    </View>
+                    <Text style={styles.stepTitle}>Paso</Text>
+                  </View>
+                  {step.time ? <Text style={styles.stepTime}>{step.time}</Text> : null}
+                </View>
+                <Text style={styles.stepText}>{step.description}</Text>
+                {step.tip ? <Text style={styles.stepTip}>{step.tip}</Text> : null}
+              </View>
             </View>
-            {step.time ? <Text style={styles.stepTime}>{step.time}</Text> : null}
-          </View>
-          <Text style={styles.stepText}>{step.description}</Text>
-          {step.tip ? <Text style={styles.stepTip}>{step.tip}</Text> : null}
+          ))}
+          {row.length === 1 ? <View style={styles.stepColumn} /> : null}
         </View>
       ))}
     </View>
@@ -889,30 +1099,32 @@ function CoverPage({
 }) {
   return (
     <Page size="A4" style={styles.coverPage}>
-      <View style={styles.coverFrame}>
-        <View style={styles.coverBrandRow}>
-          <View style={styles.markRow}>
-            <View style={styles.logoMark}>
-              <Text style={styles.logoText}>FG</Text>
-            </View>
-            <View>
-              <Text style={styles.brandName}>VENTO GROUP</Text>
-              <Text style={[styles.muted, { marginTop: 3, fontSize: 8 }]}>FOGO</Text>
-            </View>
+      <View style={styles.coverSheet}>
+        <View style={styles.coverTop}>
+          <BrandLockup />
+          <View style={{ alignItems: "flex-end", gap: 8 }}>
+            <Text style={styles.ventoWordmark}>VENTO GROUP</Text>
+            <Text style={styles.internalBadge}>Uso interno</Text>
           </View>
-          <Text style={styles.internalTag}>Uso interno</Text>
         </View>
 
-        <View style={styles.coverRule} />
-        <Text style={styles.coverKicker}>Recetario de producción</Text>
-        <Text style={styles.coverTitle}>Fichas técnicas operativas</Text>
-        <Text style={styles.coverSubtitle}>
-          Documento de consulta para cocina: rendimiento, porcionamiento, ingredientes, empaque, almacenamiento y paso a paso de producción.
-        </Text>
+        <View style={styles.coverAccent} />
+        <View style={styles.coverMain}>
+          <Text style={styles.coverKicker}>Recetario de producción</Text>
+          <Text style={styles.coverTitle}>Fichas técnicas operativas</Text>
+          <Text style={styles.coverSubtitle}>
+            Manual de consulta para cocina: rendimiento, porcionamiento, ingredientes, empaque, almacenamiento y paso a paso de producción.
+          </Text>
+        </View>
 
-        <View style={styles.coverMetaPanel}>
-          <Text style={styles.coverMetaTitle}>Generado</Text>
-          <Text style={styles.coverMetaValue}>{generatedAt}</Text>
+        <View style={styles.coverStatsBand}>
+          <View style={styles.coverStatsHeader}>
+            <View>
+              <Text style={styles.coverStatsTitle}>Generado</Text>
+              <Text style={styles.coverStatsDate}>{generatedAt}</Text>
+            </View>
+            <Text style={[styles.internalBadge, { backgroundColor: "#FFFCF7" }]}>Documento vivo</Text>
+          </View>
           <View style={styles.coverMetricsRow}>
             <View style={styles.coverMetric}>
               <Text style={styles.smallLabel}>Recetas</Text>
@@ -922,11 +1134,16 @@ function CoverPage({
               <Text style={styles.smallLabel}>Capítulos</Text>
               <Text style={styles.metricNumber}>{groupCount}</Text>
             </View>
-            <View style={[styles.coverMetric, { flexBasis: 190 }]}>
+            <View style={[styles.coverMetric, styles.coverMetricWide]}>
               <Text style={styles.smallLabel}>Criterio</Text>
-              <Text style={[styles.metricNumber, { fontSize: 12, lineHeight: 1.25 }]}>{filterText || "Recetas publicadas"}</Text>
+              <Text style={[styles.metricNumber, { fontSize: 11.2, lineHeight: 1.18 }]}>{filterText || "Recetas publicadas"}</Text>
             </View>
           </View>
+        </View>
+
+        <View style={styles.coverFooterStrip}>
+          <Text>FOGO - Vento OS</Text>
+          <Text>Vento Group - Producción</Text>
         </View>
       </View>
     </Page>
@@ -934,15 +1151,29 @@ function CoverPage({
 }
 
 function IndexPage({ groups, generatedAt }: { groups: PreparedGroup[]; generatedAt: string }) {
+  const recipes = groups.flatMap((group) => group.recipes);
+
   return (
     <Page size="A4" style={styles.page} wrap>
-      <View style={styles.topBar} fixed>
-        <Text style={styles.docTitle}>FOGO - Índice</Text>
-        <Text style={styles.docMeta}>Recetario de producción</Text>
-      </View>
+      <TopBar title="Índice" meta="Recetario de producción" />
 
-      <Text style={styles.h1}>Índice</Text>
+      <Text style={styles.h1}>Índice de recetas</Text>
       <Text style={styles.indexIntro}>Recetas publicadas organizadas por sede y área de producción.</Text>
+
+      <View style={styles.indexSummaryRow} wrap={false}>
+        <View style={styles.indexSummaryCard}>
+          <Text style={styles.smallLabel}>Recetas</Text>
+          <Text style={styles.metricValue}>{recipes.length}</Text>
+        </View>
+        <View style={styles.indexSummaryCard}>
+          <Text style={styles.smallLabel}>Capítulos</Text>
+          <Text style={styles.metricValue}>{groups.length}</Text>
+        </View>
+        <View style={[styles.indexSummaryCard, { flexBasis: 220 }]}>
+          <Text style={styles.smallLabel}>Orden</Text>
+          <Text style={styles.metricValue}>Sede - área - receta</Text>
+        </View>
+      </View>
 
       {groups.map((group, groupIndex) => (
         <View key={group.key} style={styles.indexGroup}>
@@ -951,11 +1182,19 @@ function IndexPage({ groups, generatedAt }: { groups: PreparedGroup[]; generated
             <Text style={styles.indexGroupTitle}>{group.title}</Text>
           </View>
 
+          <View style={styles.indexTableHeader} fixed>
+            <Text style={[styles.smallLabel, { width: 32 }]}>No.</Text>
+            <Text style={[styles.smallLabel, { flexGrow: 1 }]}>Receta</Text>
+            <Text style={[styles.smallLabel, { width: 132 }]}>Área</Text>
+            <Text style={[styles.smallLabel, { width: 64, textAlign: "right" }]}>Ficha</Text>
+          </View>
+
           {group.recipes.map((recipe) => (
             <View key={recipe.id} style={styles.indexRecipeRow} wrap={false}>
               <Text style={styles.indexNumber}>{String(recipe.globalIndex).padStart(2, "0")}</Text>
               <Text style={styles.indexRecipeName}>{recipe.name}</Text>
-              <Text style={styles.indexRecipeMeta}>Ficha técnica</Text>
+              <Text style={styles.indexRecipeArea}>{recipe.area}</Text>
+              <Text style={styles.indexRecipeMeta}>{String(recipe.globalIndex).padStart(2, "0")}</Text>
             </View>
           ))}
         </View>
@@ -969,10 +1208,7 @@ function IndexPage({ groups, generatedAt }: { groups: PreparedGroup[]; generated
 function EmptyPage({ generatedAt }: { generatedAt: string }) {
   return (
     <Page size="A4" style={styles.page}>
-      <View style={styles.topBar} fixed>
-        <Text style={styles.docTitle}>FOGO - Sin resultados</Text>
-        <Text style={styles.docMeta}>Recetario de producción</Text>
-      </View>
+      <TopBar title="Sin resultados" meta="Recetario de producción" />
       <Text style={styles.h1}>No hay recetas publicadas para exportar</Text>
       <Text style={[styles.muted, { marginTop: 10 }]}>Publica al menos una receta activa y vuelve a generar el PDF.</Text>
       <Footer generatedAt={generatedAt} />
@@ -983,19 +1219,16 @@ function EmptyPage({ generatedAt }: { generatedAt: string }) {
 function RecipePage({ recipe, generatedAt }: { recipe: PreparedRecipe; generatedAt: string }) {
   return (
     <Page size="A4" style={styles.page} wrap>
-      <View style={styles.topBar} fixed>
-        <Text style={styles.docTitle}>FOGO - Ficha técnica</Text>
-        <Text style={styles.docMeta}>{recipe.groupTitle}</Text>
-      </View>
+      <TopBar title="Ficha técnica" meta={recipe.groupTitle} />
 
       <View style={styles.recipeHero} wrap={false}>
         <View style={styles.recipeHeroTop}>
-          <StatusPill label={recipe.status} />
-          <StatusPill label={`Ficha ${String(recipe.globalIndex).padStart(2, "0")}`} tone="dark" />
+          <StatusPill label={recipe.status} tone="accent" />
+          <StatusPill label={`FOGO-REC-${String(recipe.globalIndex).padStart(3, "0")}`} />
         </View>
         <Text style={styles.recipeTitle}>{recipe.name}</Text>
         <Text style={styles.recipeDescription}>{recipe.description}</Text>
-        <Text style={styles.recipeLocation}>{recipe.site} · {recipe.area}</Text>
+        <Text style={styles.recipeLocation}>{recipe.site} - {recipe.area}</Text>
       </View>
 
       <View style={styles.metricsGrid} wrap={false}>
@@ -1014,18 +1247,12 @@ function RecipePage({ recipe, generatedAt }: { recipe: PreparedRecipe; generated
       </View>
 
       <View style={styles.sectionBlock}>
-        <View style={styles.sectionHeader} wrap={false}>
-          <Text style={styles.sectionLabel}>Ingredientes</Text>
-          <Text style={styles.sectionSubtle}>{recipe.ingredients.length} líneas</Text>
-        </View>
+        <SectionHeader label="Ingredientes" meta={`${recipe.ingredients.length} líneas`} />
         <IngredientsTable ingredients={recipe.ingredients} />
       </View>
 
       <View style={styles.sectionBlock}>
-        <View style={styles.sectionHeader} wrap={false}>
-          <Text style={styles.sectionLabel}>Procedimiento</Text>
-          <Text style={styles.sectionSubtle}>{recipe.steps.length} pasos</Text>
-        </View>
+        <SectionHeader label="Procedimiento" meta={`${recipe.steps.length} pasos`} />
         <StepsList steps={recipe.steps} />
       </View>
 

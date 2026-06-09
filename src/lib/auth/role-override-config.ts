@@ -19,5 +19,5 @@ export const ROLE_OPTIONS: Array<{ value: string; label: string }> = [
   { value: "pastelero", label: "Pastelero" },
   { value: "conductor", label: "Conductor" },
   { value: "compras", label: "Compras" },
-  { value: "logistica", label: "Logistica" },
+  { value: "logistica", label: "Logística" },
 ];

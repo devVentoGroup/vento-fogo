@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 
 import { requireAppAccess } from "@/lib/auth/guard";
 import { checkPermission } from "@/lib/auth/permissions";
@@ -663,7 +663,7 @@ export default async function RecipeBookPage({
     isOwnerScope ? selectedSiteName : null,
     selectedAreaName,
     visibleRecipeTypeText,
-    searchTerm ? `busqueda: ${searchTerm}` : null,
+    searchTerm ? `búsqueda: ${searchTerm}` : null,
   ].filter(Boolean).join(" · ");
 
   const renderRecipeCard = (recipe: RecipeCardRow, compact = false) => {
@@ -788,7 +788,7 @@ export default async function RecipeBookPage({
             >
               {!coverImage ? (
                 <div className="flex h-full items-center justify-center text-4xl font-semibold text-[#F97316]">
-                  {selectedRecipe ? String(selectedProduct?.name ?? "R").trim().charAt(0).toUpperCase() || "R" : "✦"}
+                  {selectedRecipe ? String(selectedProduct?.name ?? "R").trim().charAt(0).toUpperCase() || "R" : "âœ¦"}
                 </div>
               ) : null}
             </div>
@@ -821,7 +821,7 @@ export default async function RecipeBookPage({
               </h1>
               <p className="mt-2 max-w-3xl text-base leading-7 text-[var(--ui-muted)]">
                 {selectedRecipe
-                  ? selectedRecipe.recipe_description || "Ficha visual de produccion con ingredientes escalados y pasos faciles de seguir."
+                  ? selectedRecipe.recipe_description || "Ficha visual de producción con ingredientes escalados y pasos fáciles de seguir."
                   : "Explora el recetario por sede y area. Abre una ficha para ver ingredientes, porciones y preparacion."}
               </p>
 
@@ -835,7 +835,7 @@ export default async function RecipeBookPage({
 
           {selectedRecipe ? (
             <aside className="rounded-3xl border border-[#FED7AA] bg-white p-4 shadow-[var(--ui-shadow-soft)]">
-              <div className="text-xs font-semibold uppercase text-[#C2410C]">Produccion</div>
+              <div className="text-xs font-semibold uppercase text-[#C2410C]">Producción</div>
               <form className="mt-3 space-y-3">
                 {selectedSiteId ? <input type="hidden" name="site_id" value={selectedSiteId} /> : null}
                 {selectedAreaId ? <input type="hidden" name="area_id" value={selectedAreaId} /> : null}
@@ -984,7 +984,7 @@ export default async function RecipeBookPage({
 
       {recipes.length === 0 ? (
         <section className="rounded-[var(--ui-radius-card)] border border-[#FED7AA] bg-[#FFF7ED] p-6 text-center shadow-[var(--ui-shadow-soft)]">
-          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl bg-white text-3xl text-[#F97316]">✦</div>
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl bg-white text-3xl text-[#F97316]">âœ¦</div>
           <h2 className="mt-4 text-2xl font-semibold text-[var(--ui-text)]">No hay recetas con estos filtros</h2>
           <p className="mx-auto mt-2 max-w-2xl text-sm leading-6 text-[var(--ui-muted)]">
             Prueba con otra sede, otra area, otro estado o limpia la busqueda.
@@ -1005,7 +1005,7 @@ export default async function RecipeBookPage({
                 {recipeGroups.map((group) => (
                   <div key={group.key}>
                     <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase text-[#C2410C]">
-                      <span>✦</span>
+                      <span>âœ¦</span>
                       <span className="truncate">{group.title}</span>
                     </div>
                     <div className="grid gap-2">
@@ -1021,7 +1021,7 @@ export default async function RecipeBookPage({
             <section className="rounded-[var(--ui-radius-card)] border border-[var(--ui-border)] bg-white p-5 shadow-[var(--ui-shadow-1)] md:p-6">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <div className="text-xs font-semibold uppercase text-[#C2410C]">Ficha de produccion</div>
+                  <div className="text-xs font-semibold uppercase text-[#C2410C]">Ficha de producción</div>
                   <h2 className="mt-1 text-3xl font-semibold text-[var(--ui-text)]">{selectedProduct?.name ?? "Receta"}</h2>
                   <p className="mt-1 text-sm text-[var(--ui-muted)]">
                     {isOwnerScope ? `${selectedSiteName} · ` : ""}{selectedAreaName} · {statusLabel(selectedRecipe.status)}
@@ -1204,7 +1204,7 @@ export default async function RecipeBookPage({
                     <h3 className="mt-1 text-xl font-semibold text-[var(--ui-text)]">{group.title}</h3>
                     <p className="mt-1 text-sm text-[var(--ui-muted)]">{group.recipes.length} recetas</p>
                   </div>
-                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#FFF7ED] text-2xl text-[#F97316]">✦</div>
+                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#FFF7ED] text-2xl text-[#F97316]">âœ¦</div>
                 </div>
                 <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
                   {group.recipes.map((recipe) => renderRecipeCard(recipe))}

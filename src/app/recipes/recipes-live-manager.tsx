@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
@@ -342,7 +342,7 @@ export function RecipesLiveManager({
                 <th className="ui-th">Pasos</th>
                 <th className="ui-th">Estado</th>
                 <th className="ui-th">Actualizado</th>
-                <th className="ui-th">Accion</th>
+                <th className="ui-th">Acción</th>
               </tr>
             </thead>
             <tbody>
@@ -369,7 +369,7 @@ export function RecipesLiveManager({
                     <td className="ui-td">
                       {qty(row.yield_qty)} {row.yield_unit}
                     </td>
-                    <td className="ui-td">{ingredient.lines} lineas</td>
+                    <td className="ui-td">{ingredient.lines} líneas</td>
                     <td className="ui-td">{steps}</td>
                     <td className="ui-td">
                       <span className={`ui-chip ${row.status === "published" ? "ui-chip--success" : "ui-chip--warn"}`}>
@@ -400,7 +400,7 @@ export function RecipesLiveManager({
                 <tr>
                   <td className="ui-td ui-empty" colSpan={10}>
                     {searchTerm.trim()
-                      ? "No hay recetas que coincidan con esa busqueda."
+                      ? "No hay recetas que coincidan con esa búsqueda."
                       : hasFocusedRecipeCard
                         ? "No se encontro la receta en la sede activa. Cambia de sede para verla."
                         : "No hay recetas para la sede activa."}

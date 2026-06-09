@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -302,7 +302,7 @@ export function RecipeIngredientsEditor({
         <div className="col-span-1">Unidad</div>
         <div className="col-span-2">Costo unit.</div>
         <div className="col-span-1">Subtotal</div>
-        <div className="col-span-1 text-right">Accion</div>
+        <div className="col-span-1 text-right">Acción</div>
       </div>
       <div className="space-y-2">
         {visibleLines.map((line, index) => {
@@ -391,7 +391,7 @@ export function RecipeIngredientsEditor({
                       className="ui-input !h-9 !py-1 text-xs"
                     >
                       <option value="purchase">Compra (un)</option>
-                      <option value="technical">Tecnica ({technicalConfig.technicalUnit})</option>
+                      <option value="technical">Técnica ({technicalConfig.technicalUnit})</option>
                     </select>
                   </div>
                 ) : null}

@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
 
@@ -411,7 +411,7 @@ export function RecipeBaseFields({
             <div className="text-xs font-semibold uppercase tracking-wide text-[var(--ui-muted)]">Paso 4</div>
             <p className="mt-1 text-sm font-semibold text-[var(--ui-text)]">Operacion</p>
             <label className="mt-3 flex flex-col gap-1">
-              <span className="ui-label">Descripcion corta de la receta</span>
+              <span className="ui-label">Descripción corta de la receta</span>
               <textarea
                 name="recipe_description"
                 rows={3}

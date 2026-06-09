@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
@@ -34,7 +34,7 @@ type Step = { id: string; title: string; objective: string };
 
 const STEPS: Step[] = [
   { id: "cabecera", title: "Cabecera", objective: "Define proveedor, sede y fecha esperada." },
-  { id: "lineas", title: "Lineas", objective: "Agrega productos, cantidades y costo unitario." },
+  { id: "líneas", title: "Líneas", objective: "Agrega productos, cantidades y costo unitario." },
   { id: "resumen", title: "Resumen", objective: "Valida datos y confirma guardado." },
 ];
 
@@ -220,14 +220,14 @@ export function PurchaseOrderGuidedForm({
         </div>
         <div className="ui-panel-soft space-y-1 p-3">
           <div className="ui-caption"><strong>Que significa:</strong> Define proveedor y sede de la orden.</div>
-          <div className="ui-caption"><strong>Cuando usarlo:</strong> Siempre antes de agregar lineas.</div>
+          <div className="ui-caption"><strong>Cuando usarlo:</strong> Siempre antes de agregar líneas.</div>
           <div className="ui-caption"><strong>Ejemplo:</strong> Proveedor: Alimentos XYZ; Sede: Vento Group.</div>
         </div>
       </section>
 
-      <section className={stepId === "lineas" ? "ui-panel space-y-4" : "hidden"}>
+      <section className={stepId === "líneas" ? "ui-panel space-y-4" : "hidden"}>
         <div className="flex items-center justify-between gap-2">
-          <div className="ui-h3">Paso 2. Lineas</div>
+          <div className="ui-h3">Paso 2. Líneas</div>
           <div className="ui-caption">{validLineCount} linea(s) validas</div>
         </div>
         <div className="overflow-x-auto">
@@ -311,7 +311,7 @@ export function PurchaseOrderGuidedForm({
             <div className="font-semibold">{sites.find((s) => s.id === siteId)?.name ?? "Sin definir"}</div>
           </div>
           <div className="ui-panel-soft p-3">
-            <div className="ui-caption">Lineas validas</div>
+            <div className="ui-caption">Líneas validas</div>
             <div className="font-semibold">{validLineCount}</div>
           </div>
           <div className="ui-panel-soft p-3">

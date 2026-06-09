@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 
 import { requireAppAccess } from "@/lib/auth/guard";
 
@@ -32,7 +32,7 @@ export default async function FogoHomePage() {
         </Link>
 
         <Link href="/production-batches" className="ui-panel block transition hover:shadow-lg">
-          <div className="ui-h3">Lotes de produccion</div>
+          <div className="ui-h3">Lotes de producción</div>
           <p className="mt-1 ui-body-muted">
             Ejecucion de produccion con consumo de BOM e ingreso de terminado.
           </p>

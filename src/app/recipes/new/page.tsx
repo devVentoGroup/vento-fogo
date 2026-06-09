@@ -1,4 +1,4 @@
-import { redirect } from "next/navigation";
+﻿import { redirect } from "next/navigation";
 
 import { requireAppAccess } from "@/lib/auth/guard";
 import { RecipeBaseFields } from "@/features/recipes/recipe-base-fields";
@@ -214,7 +214,7 @@ async function saveRecipe(formData: FormData) {
     try {
       ingredientLines = JSON.parse(ingredientRaw) as IngredientLine[];
     } catch {
-      redirect(withQuery(returnBase, "error", "Formato invalido en ingredientes."));
+      redirect(withQuery(returnBase, "error", "Formato inválido en ingredientes."));
     }
   }
 
@@ -232,7 +232,7 @@ async function saveRecipe(formData: FormData) {
     try {
       steps = JSON.parse(stepsRaw) as RecipeStepLine[];
     } catch {
-      redirect(withQuery(returnBase, "error", "Formato invalido en pasos."));
+      redirect(withQuery(returnBase, "error", "Formato inválido en pasos."));
     }
   }
 

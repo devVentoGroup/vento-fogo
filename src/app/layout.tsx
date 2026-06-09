@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+﻿import type { Metadata } from "next";
 import { Geist_Mono, Manrope } from "next/font/google";
 import Script from "next/script";
 
@@ -19,7 +19,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Vento OS - FOGO",
-  description: "Recetas, produccion y lotes operativos.",
+  description: "Recetas, producción y lotes operativos.",
   applicationName: "Vento OS",
   authors: [{ name: "Vento Group" }],
   metadataBase: new URL("https://fogo.ventogroup.co"),
@@ -48,6 +48,58 @@ export default function RootLayout({
                 event.preventDefault();
               }
             }, { passive: false });
+          })();`}
+        </Script>
+        <Script id="vento-submit-guard" strategy="afterInteractive">
+          {`(() => {
+            if (window.__ventoSubmitGuard) return;
+            window.__ventoSubmitGuard = true;
+
+            const pendingTextByButton = new WeakMap();
+
+            document.addEventListener('submit', (event) => {
+              const form = event.target;
+              if (!(form instanceof HTMLFormElement)) return;
+              if (form.dataset.submitGuard === 'off') return;
+              if (!form.checkValidity()) return;
+
+              if (form.dataset.submitting === 'true') {
+                event.preventDefault();
+                event.stopImmediatePropagation();
+                return;
+              }
+
+              form.dataset.submitting = 'true';
+              const buttons = [
+                ...form.querySelectorAll('button[type="submit"], button:not([type])'),
+                ...(form.id ? document.querySelectorAll('button[form="' + CSS.escape(form.id) + '"]') : []),
+              ];
+              for (const button of buttons) {
+                if (!(button instanceof HTMLButtonElement)) continue;
+                pendingTextByButton.set(button, button.textContent || '');
+                button.disabled = true;
+                button.setAttribute('aria-disabled', 'true');
+                const pendingLabel = button.dataset.pendingLabel || 'Guardando...';
+                if (button.dataset.pendingLabel !== 'off') button.textContent = pendingLabel;
+              }
+            }, true);
+
+            window.addEventListener('pageshow', () => {
+              for (const form of document.querySelectorAll('form[data-submitting="true"]')) {
+                form.dataset.submitting = 'false';
+                const buttons = [
+                  ...form.querySelectorAll('button[type="submit"], button:not([type])'),
+                  ...(form.id ? document.querySelectorAll('button[form="' + CSS.escape(form.id) + '"]') : []),
+                ];
+                for (const button of buttons) {
+                  if (!(button instanceof HTMLButtonElement)) continue;
+                  button.disabled = false;
+                  button.removeAttribute('aria-disabled');
+                  const previousText = pendingTextByButton.get(button);
+                  if (previousText) button.textContent = previousText;
+                }
+              }
+            });
           })();`}
         </Script>
         <VentoShell>{children}</VentoShell>

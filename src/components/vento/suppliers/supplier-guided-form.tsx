@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
@@ -217,7 +217,7 @@ export function SupplierGuidedForm({
         </div>
         <div className="ui-panel-soft space-y-1 p-3">
           <div className="ui-caption"><strong>Que significa:</strong> Canales para confirmar pedidos, cambios y tiempos.</div>
-          <div className="ui-caption"><strong>Cuando usarlo:</strong> Si hay un responsable de compras, registralo aqui.</div>
+          <div className="ui-caption"><strong>Cuando usarlo:</strong> Si hay un responsable de compras, registralo aquí.</div>
           <div className="ui-caption"><strong>Ejemplo:</strong> Contacto: Paula Ramirez; Tel: +57 300 123 4567.</div>
         </div>
       </section>

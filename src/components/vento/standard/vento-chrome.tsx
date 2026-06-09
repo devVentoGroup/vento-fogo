@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -82,7 +82,7 @@ const APP_ENTITY =
 const APP_NAME = process.env.NEXT_PUBLIC_VENTO_APP_NAME ?? "FOGO";
 
 const APP_TAGLINE =
-  process.env.NEXT_PUBLIC_VENTO_APP_TAGLINE ?? "Recetas, produccion y lotes";
+  process.env.NEXT_PUBLIC_VENTO_APP_TAGLINE ?? "Recetas, producción y lotes";
 
 function Icon({ name }: { name?: IconName }) {
   const common = "none";

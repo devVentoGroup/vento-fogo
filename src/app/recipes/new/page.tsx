@@ -68,6 +68,11 @@ type UnitOption = {
   is_active: boolean;
 };
 
+type RecipeDependencyRow = {
+  product_id: string | null;
+  ingredient_product_id: string | null;
+};
+
 const PRODUCTION_RECIPE_AREA_KINDS = ["bodega", "cocina_caliente", "panaderia", "reposteria"];
 const PRODUCTION_RECIPE_AREA_ORDER = new Map(
   PRODUCTION_RECIPE_AREA_KINDS.map((kind, index) => [kind, index])
@@ -157,6 +162,49 @@ function parseJsonObject(value: string) {
   } catch {
     return null;
   }
+}
+
+function findRecipeCyclePath(
+  targetProductId: string,
+  ingredientProductIds: string[],
+  dependencies: RecipeDependencyRow[]
+): string[] | null {
+  const target = targetProductId.trim();
+  if (!target) return null;
+
+  const graph = new Map<string, string[]>();
+  for (const row of dependencies) {
+    const productId = String(row.product_id ?? "").trim();
+    const ingredientId = String(row.ingredient_product_id ?? "").trim();
+    if (!productId || !ingredientId) continue;
+    const edges = graph.get(productId) ?? [];
+    edges.push(ingredientId);
+    graph.set(productId, edges);
+  }
+
+  for (const ingredientId of ingredientProductIds) {
+    const start = ingredientId.trim();
+    if (!start) continue;
+    if (start === target) return [target, start];
+
+    const queue: Array<{ productId: string; path: string[] }> = [{ productId: start, path: [target, start] }];
+    const visited = new Set<string>([target]);
+
+    while (queue.length > 0) {
+      const current = queue.shift();
+      if (!current) break;
+      if (visited.has(current.productId)) continue;
+      visited.add(current.productId);
+
+      for (const next of graph.get(current.productId) ?? []) {
+        const path = [...current.path, next];
+        if (next === target) return path;
+        if (!visited.has(next)) queue.push({ productId: next, path });
+      }
+    }
+  }
+
+  return null;
 }
 
 function withQuery(path: string, key: string, value: string) {
@@ -287,6 +335,35 @@ async function saveRecipe(formData: FormData) {
     const area = ((validAreas ?? []) as AreaOption[]).find((option) => option.id === areaId) ?? null;
     if (!area) {
       redirect(withQuery(returnBase, "error", "Selecciona un area productiva valida para el recetario."));
+    }
+  }
+
+  if (normalizedIngredients.length > 0) {
+    const ingredientProductIds = Array.from(
+      new Set(normalizedIngredients.map((line) => line.ingredient_product_id))
+    );
+    const { data: dependencyRows, error: dependencyError } = await supabase
+      .from("recipes")
+      .select("product_id,ingredient_product_id")
+      .eq("is_active", true);
+
+    if (dependencyError) {
+      redirect(withQuery(returnBase, "error", dependencyError.message));
+    }
+
+    const cyclePath = findRecipeCyclePath(
+      productId,
+      ingredientProductIds,
+      (dependencyRows ?? []) as RecipeDependencyRow[]
+    );
+    if (cyclePath) {
+      redirect(
+        withQuery(
+          returnBase,
+          "error",
+          "La receta crea un ciclo entre productos. Revisa los ingredientes antes de guardar."
+        )
+      );
     }
   }
 

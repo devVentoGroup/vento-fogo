@@ -73,19 +73,6 @@ type RecipeDependencyRow = {
   ingredient_product_id: string | null;
 };
 
-const PRODUCTION_RECIPE_AREA_KINDS = ["bodega", "cocina_caliente", "panaderia", "reposteria"];
-const PRODUCTION_RECIPE_AREA_ORDER = new Map(
-  PRODUCTION_RECIPE_AREA_KINDS.map((kind, index) => [kind, index])
-);
-const PRODUCTION_RECIPE_AREA_CODES = new Set(["BODEGA", "COC-CAL", "PAN-GALL", "REPOSTERIA"]);
-const PRODUCTION_RECIPE_AREA_SLUGS = new Set([
-  "bodega",
-  "bodega_principal",
-  "cocina_caliente",
-  "galleteria_y_panaderia",
-  "reposteria",
-]);
-
 function asText(value: FormDataEntryValue | null) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -122,33 +109,7 @@ function isStandalonePanaderiaArea(area: AreaOption) {
   return code === "PAN" || code === "PANADERIA" || slug === "panaderia";
 }
 
-function isProductionRecipeArea(area: AreaOption, allowedKinds: Set<string>) {
-  const code = String(area.code ?? "").trim().toUpperCase();
-  const kind = String(area.kind ?? "").trim();
-  const slug = normalizeSlug(area.name);
-  return (
-    !isStandalonePanaderiaArea(area) &&
-    (allowedKinds.has(kind) ||
-      PRODUCTION_RECIPE_AREA_CODES.has(code) ||
-      PRODUCTION_RECIPE_AREA_SLUGS.has(slug))
-  );
-}
-
 function sortProductionAreas(a: AreaOption, b: AreaOption) {
-  const areaOrder = (area: AreaOption) => {
-    const kindOrder = PRODUCTION_RECIPE_AREA_ORDER.get(String(area.kind ?? ""));
-    if (kindOrder != null) return kindOrder;
-    const code = String(area.code ?? "").trim().toUpperCase();
-    const slug = normalizeSlug(area.name);
-    if (code === "BODEGA" || slug === "bodega" || slug === "bodega_principal") return 0;
-    if (code === "COC-CAL" || slug === "cocina_caliente") return 1;
-    if (code === "PAN-GALL" || slug === "galleteria_y_panaderia") return 2;
-    if (code === "REPOSTERIA" || slug === "reposteria") return 3;
-    return 999;
-  };
-  const aOrder = areaOrder(a);
-  const bOrder = areaOrder(b);
-  if (aOrder !== bOrder) return aOrder - bOrder;
   return String(a.name ?? a.code ?? "").localeCompare(String(b.name ?? b.code ?? ""), "es");
 }
 
@@ -777,9 +738,8 @@ export default async function NewRecipePage({
       recipeAreasData = (fallbackAreasData ?? []) as AreaOption[];
     }
   }
-  const allowedAreaKinds = new Set(PRODUCTION_RECIPE_AREA_KINDS);
   const areas = recipeAreasData
-    .filter((area) => isProductionRecipeArea(area, allowedAreaKinds))
+    .filter((area) => !isStandalonePanaderiaArea(area))
     .sort(sortProductionAreas);
 
   const formAreaId =

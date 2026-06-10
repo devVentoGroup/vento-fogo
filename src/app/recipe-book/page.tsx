@@ -145,19 +145,6 @@ function siteLabel(site: SiteShape | null | undefined) {
   return site?.name || site?.site_type || "Sin sede";
 }
 
-const PRODUCTION_RECIPE_AREA_KINDS = ["bodega", "cocina_caliente", "panaderia", "reposteria"];
-const PRODUCTION_RECIPE_AREA_ORDER = new Map(
-  PRODUCTION_RECIPE_AREA_KINDS.map((kind, index) => [kind, index])
-);
-const PRODUCTION_RECIPE_AREA_CODES = new Set(["BODEGA", "COC-CAL", "PAN-GALL", "REPOSTERIA"]);
-const PRODUCTION_RECIPE_AREA_SLUGS = new Set([
-  "bodega",
-  "bodega_principal",
-  "cocina_caliente",
-  "galleteria_y_panaderia",
-  "reposteria",
-]);
-
 function normalizeSlug(value: string | null | undefined) {
   return String(value ?? "")
     .normalize("NFD")
@@ -260,33 +247,7 @@ function isStandalonePanaderiaArea(area: AreaShape) {
   return code === "PAN" || code === "PANADERIA" || slug === "panaderia";
 }
 
-function isProductionRecipeArea(area: AreaShape, allowedKinds: Set<string>) {
-  const code = String(area.code ?? "").trim().toUpperCase();
-  const kind = String(area.kind ?? "").trim();
-  const slug = normalizeSlug(area.name);
-  return (
-    !isStandalonePanaderiaArea(area) &&
-    (allowedKinds.has(kind) ||
-      PRODUCTION_RECIPE_AREA_CODES.has(code) ||
-      PRODUCTION_RECIPE_AREA_SLUGS.has(slug))
-  );
-}
-
 function sortProductionAreas(a: AreaShape, b: AreaShape) {
-  const areaOrder = (area: AreaShape) => {
-    const kindOrder = PRODUCTION_RECIPE_AREA_ORDER.get(String(area.kind ?? ""));
-    if (kindOrder != null) return kindOrder;
-    const code = String(area.code ?? "").trim().toUpperCase();
-    const slug = normalizeSlug(area.name);
-    if (code === "BODEGA" || slug === "bodega" || slug === "bodega_principal") return 0;
-    if (code === "COC-CAL" || slug === "cocina_caliente") return 1;
-    if (code === "PAN-GALL" || slug === "galleteria_y_panaderia") return 2;
-    if (code === "REPOSTERIA" || slug === "reposteria") return 3;
-    return 999;
-  };
-  const aOrder = areaOrder(a);
-  const bOrder = areaOrder(b);
-  if (aOrder !== bOrder) return aOrder - bOrder;
   return String(a.name ?? a.code ?? "").localeCompare(String(b.name ?? b.code ?? ""), "es");
 }
 
@@ -446,14 +407,13 @@ export default async function RecipeBookPage({
   const statusScopedRecipesForSite = searchScopedRecipes.filter(recipeMatchesStatus);
   const allRecipes = siteScopedRecipesForStatus.filter(recipeMatchesStatus);
 
-  const allowedAreaKinds = new Set(PRODUCTION_RECIPE_AREA_KINDS);
   const areas = mergeAreas(recipeAreasData, allRecipes)
     .filter((area) => {
       const areaSiteId = String(area.site_id ?? "");
       if (isOwnerScope && selectedSiteId && !siteFilterIsUnassigned && areaSiteId && areaSiteId !== selectedSiteId) {
         return false;
       }
-      return isProductionRecipeArea(area, allowedAreaKinds) || allRecipes.some((recipe) => recipe.area_id === area.id);
+      return !isStandalonePanaderiaArea(area) || allRecipes.some((recipe) => recipe.area_id === area.id);
     })
     .sort(sortProductionAreas);
 

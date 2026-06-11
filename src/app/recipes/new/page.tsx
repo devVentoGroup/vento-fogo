@@ -445,7 +445,7 @@ async function saveRecipe(formData: FormData) {
       withQuery(
         returnBase,
         "error",
-        "Este producto ya tiene una receta asociada. Usa la pagina de edicion de recetas existentes.",
+        "Este producto ya tiene una receta asociada. Usa la página de edición de recetas existentes.",
       ),
     );
   }
@@ -795,7 +795,6 @@ export default async function NewRecipePage({
     : "";
   const selectedProduct =
     productsWithoutRecipe.find((row) => row.id === selectedProductId) ?? null;
-  const selectedRecipeCard: RecipeCardRow | null = null;
 
   const initialIngredientLines: IngredientLine[] = [];
   const initialSteps: RecipeStepLine[] = [];
@@ -804,7 +803,7 @@ export default async function NewRecipePage({
   const formSiteId = requestedSiteId || resolvedSiteId;
   const productSelectionWarning = requestedProductId
     ? requestedProductHasRecipe
-      ? "Este producto ya tiene una receta asociada. Para cambiarla, entra desde la receta existente y usa edicion."
+      ? "Este producto ya tiene una receta asociada. Para cambiarla, entra desde la receta existente y usa edición."
       : requestedProduct
         ? "No fue posible seleccionar este producto para nueva receta. Revisa que este activo y sea de tipo preparacion o venta."
         : "El producto solicitado no existe o no esta disponible para crear receta."

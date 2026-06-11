@@ -1,4 +1,4 @@
-﻿import { redirect } from "next/navigation";
+import { redirect } from "next/navigation";
 
 import { requireAppAccess } from "@/lib/auth/guard";
 import { RecipeBaseFields } from "@/features/recipes/recipe-base-fields";
@@ -182,29 +182,33 @@ function withQuery(path: string, key: string, value: string) {
   return `${path}${path.includes("?") ? "&" : "?"}${key}=${encodeURIComponent(value)}`;
 }
 
-function baseNewPath(
+function baseEditPath(
+  recipeCardId: string,
   siteId: string,
   areaId: string,
   productId: string,
   source: string,
 ) {
+  const recipeId = recipeCardId.trim();
   const qs = new URLSearchParams();
   if (siteId) qs.set("site_id", siteId);
   if (areaId) qs.set("area_id", areaId);
   if (productId) qs.set("product_id", productId);
   if (source) qs.set("source", source);
   const query = qs.toString();
-  return query ? `/recipes/new?${query}` : "/recipes/new";
+  const base = recipeId ? `/recipes/${encodeURIComponent(recipeId)}/edit` : "/recipes";
+  return query ? `${base}?${query}` : base;
 }
 
 async function saveRecipe(formData: FormData) {
   "use server";
 
+  const recipeCardId = asText(formData.get("recipe_card_id"));
   const siteId = asText(formData.get("site_id"));
   const areaId = asText(formData.get("area_id"));
   const source = asText(formData.get("source"));
   const productId = asText(formData.get("product_id"));
-  const returnBase = baseNewPath(siteId, areaId, productId, source);
+  const returnBase = baseEditPath(recipeCardId, siteId, areaId, productId, source);
 
   const { supabase } = await requireAppAccess({
     appId: APP_ID,
@@ -212,12 +216,36 @@ async function saveRecipe(formData: FormData) {
     permissionCode: "production.recipes.manage",
   });
 
+  if (!recipeCardId) {
+    redirect(withQuery("/recipes", "error", "No se recibio la receta que deseas editar."));
+  }
+
+  const { data: currentRecipeCard, error: currentRecipeErr } = await supabase
+    .from("recipe_cards")
+    .select("id,product_id")
+    .eq("id", recipeCardId)
+    .maybeSingle();
+
+  if (currentRecipeErr) {
+    redirect(withQuery(returnBase, "error", currentRecipeErr.message));
+  }
+
+  if (!currentRecipeCard?.id) {
+    redirect(withQuery("/recipes", "error", "La receta que intentas editar no existe."));
+  }
+
+  const currentProductId = String(currentRecipeCard.product_id ?? "").trim();
+
   if (!productId) {
+    redirect(withQuery(returnBase, "error", "La receta no tiene producto asociado."));
+  }
+
+  if (productId !== currentProductId) {
     redirect(
       withQuery(
         returnBase,
         "error",
-        "Selecciona un producto para guardar la receta.",
+        "No puedes cambiar el producto asociado desde edicion. Crea una receta nueva para otro producto.",
       ),
     );
   }
@@ -230,24 +258,33 @@ async function saveRecipe(formData: FormData) {
   const productRow = (product as ProductOption | null) ?? null;
 
   if (!productRow || !productRow.is_active) {
-    redirect(
-      withQuery(
-        returnBase,
-        "error",
-        "El producto seleccionado no esta activo.",
-      ),
-    );
+    redirect(withQuery(returnBase, "error", "El producto seleccionado no esta activo."));
   }
 
   const productType = String(productRow.product_type ?? "")
     .trim()
     .toLowerCase();
   if (!["preparacion", "venta"].includes(productType)) {
+    redirect(withQuery(returnBase, "error", "Solo se permiten productos tipo preparacion o venta."));
+  }
+
+  const { data: duplicateRecipeCard, error: duplicateRecipeErr } = await supabase
+    .from("recipe_cards")
+    .select("id")
+    .eq("product_id", productId)
+    .neq("id", recipeCardId)
+    .maybeSingle();
+
+  if (duplicateRecipeErr) {
+    redirect(withQuery(returnBase, "error", duplicateRecipeErr.message));
+  }
+
+  if (duplicateRecipeCard?.id) {
     redirect(
       withQuery(
         returnBase,
         "error",
-        "Solo se permiten productos tipo preparacion o venta.",
+        "Este producto esta asociado a otra receta. Revisa duplicados antes de guardar.",
       ),
     );
   }
@@ -258,9 +295,7 @@ async function saveRecipe(formData: FormData) {
     try {
       ingredientLines = JSON.parse(ingredientRaw) as IngredientLine[];
     } catch {
-      redirect(
-        withQuery(returnBase, "error", "Formato inválido en ingredientes."),
-      );
+      redirect(withQuery(returnBase, "error", "Formato invalido en ingredientes."));
     }
   }
 
@@ -283,7 +318,7 @@ async function saveRecipe(formData: FormData) {
     try {
       steps = JSON.parse(stepsRaw) as RecipeStepLine[];
     } catch {
-      redirect(withQuery(returnBase, "error", "Formato inválido en pasos."));
+      redirect(withQuery(returnBase, "error", "Formato invalido en pasos."));
     }
   }
 
@@ -311,56 +346,25 @@ async function saveRecipe(formData: FormData) {
   const status: "draft" | "published" | "archived" =
     statusRaw === "published" || statusRaw === "archived" ? statusRaw : "draft";
   const yieldQty = asPositive(formData.get("yield_qty"), 1);
-  const yieldUnit =
-    asText(formData.get("yield_unit")) || productRow.unit || "un";
+  const yieldUnit = asText(formData.get("yield_unit")) || productRow.unit || "un";
   const portionSize = asNullableNumber(formData.get("portion_size"));
   const portionUnit = asText(formData.get("portion_unit")) || null;
 
   if (status === "published") {
     if (!siteId || !areaId) {
-      redirect(
-        withQuery(
-          returnBase,
-          "error",
-          "Para publicar debes seleccionar sede y area productiva.",
-        ),
-      );
+      redirect(withQuery(returnBase, "error", "Para publicar debes seleccionar sede y area productiva."));
     }
     if (!yieldQty || yieldQty <= 0 || !yieldUnit) {
-      redirect(
-        withQuery(
-          returnBase,
-          "error",
-          "Para publicar debes completar rendimiento y unidad.",
-        ),
-      );
+      redirect(withQuery(returnBase, "error", "Para publicar debes completar rendimiento y unidad."));
     }
     if (!portionSize || portionSize <= 0 || !portionUnit) {
-      redirect(
-        withQuery(
-          returnBase,
-          "error",
-          "Para publicar debes completar porcion y unidad de porcion.",
-        ),
-      );
+      redirect(withQuery(returnBase, "error", "Para publicar debes completar porcion y unidad de porcion."));
     }
     if (normalizedIngredients.length <= 0) {
-      redirect(
-        withQuery(
-          returnBase,
-          "error",
-          "Para publicar debes tener al menos 1 ingrediente activo en BOM.",
-        ),
-      );
+      redirect(withQuery(returnBase, "error", "Para publicar debes tener al menos 1 ingrediente activo en BOM."));
     }
     if (normalizedStepDraft.length <= 0) {
-      redirect(
-        withQuery(
-          returnBase,
-          "error",
-          "Para publicar debes tener al menos 1 paso de preparacion.",
-        ),
-      );
+      redirect(withQuery(returnBase, "error", "Para publicar debes tener al menos 1 paso de preparacion."));
     }
   }
 
@@ -369,17 +373,9 @@ async function saveRecipe(formData: FormData) {
       ? await supabase.rpc("fogo_recipe_area_options", { p_site_id: siteId })
       : { data: [] as AreaOption[] };
     const area =
-      ((validAreas ?? []) as AreaOption[]).find(
-        (option) => option.id === areaId,
-      ) ?? null;
+      ((validAreas ?? []) as AreaOption[]).find((option) => option.id === areaId) ?? null;
     if (!area) {
-      redirect(
-        withQuery(
-          returnBase,
-          "error",
-          "Selecciona un area productiva valida para el recetario.",
-        ),
-      );
+      redirect(withQuery(returnBase, "error", "Selecciona un area productiva valida para el recetario."));
     }
   }
 
@@ -422,49 +418,20 @@ async function saveRecipe(formData: FormData) {
     shelf_life_days: asNullableNumber(formData.get("shelf_life_days")),
     difficulty: asText(formData.get("difficulty")) || null,
     recipe_description: asText(formData.get("recipe_description")) || null,
-    process_config:
-      parseJsonObject(asText(formData.get("process_config"))) ?? {},
+    process_config: parseJsonObject(asText(formData.get("process_config"))) ?? {},
     status,
     is_active: asText(formData.get("is_active")) === "1",
   };
   if (siteId) recipePayload.site_id = siteId;
   recipePayload.area_id = areaId || null;
 
-  const { data: existingCard, error: existingCardErr } = await supabase
+  const { error: updateErr } = await supabase
     .from("recipe_cards")
-    .select("id")
-    .eq("product_id", productId)
-    .maybeSingle();
-
-  if (existingCardErr) {
-    redirect(withQuery(returnBase, "error", existingCardErr.message));
+    .update(recipePayload)
+    .eq("id", recipeCardId);
+  if (updateErr) {
+    redirect(withQuery(returnBase, "error", updateErr.message));
   }
-
-  if (existingCard?.id) {
-    redirect(
-      withQuery(
-        returnBase,
-        "error",
-        "Este producto ya tiene una receta asociada. Usa la pagina de edicion de recetas existentes.",
-      ),
-    );
-  }
-
-  const { data: inserted, error: insertErr } = await supabase
-    .from("recipe_cards")
-    .insert(recipePayload)
-    .select("id")
-    .single();
-  if (insertErr || !inserted?.id) {
-    redirect(
-      withQuery(
-        returnBase,
-        "error",
-        insertErr?.message || "No se pudo crear la receta.",
-      ),
-    );
-  }
-  const recipeCardId = String(inserted.id);
 
   const { error: deleteIngredientsErr } = await supabase
     .from("recipes")
@@ -515,9 +482,7 @@ async function saveRecipe(formData: FormData) {
     }, 0);
 
     const yieldQtyRaw = Number(recipePayload.yield_qty ?? 0);
-    const yieldUnitCode = normalizeUnitCode(
-      String(recipePayload.yield_unit ?? ""),
-    );
+    const yieldUnitCode = normalizeUnitCode(String(recipePayload.yield_unit ?? ""));
     const stockUnitCode = normalizeUnitCode(
       String(productRow.stock_unit_code ?? productRow.unit ?? ""),
     );
@@ -644,6 +609,13 @@ function RecipeFormSafetyScript() {
     var status = fieldValue("status").toLowerCase() || "draft";
     var siteId = fieldValue("site_id");
     var areaId = fieldValue("area_id");
+    var productId = fieldValue("product_id");
+
+    if (!productId) {
+      event.preventDefault();
+      showClientError("La receta no tiene producto asociado. No se envio el formulario, asi que no se pierde lo que escribiste.");
+      return false;
+    }
 
     if (status === "published" && (!siteId || !areaId)) {
       event.preventDefault();
@@ -665,9 +637,11 @@ function RecipeFormSafetyScript() {
   );
 }
 
-export default async function NewRecipePage({
+export default async function EditRecipePage({
+  params,
   searchParams,
 }: {
+  params?: Promise<{ id?: string }>;
   searchParams?: Promise<{
     site_id?: string;
     area_id?: string;
@@ -676,6 +650,13 @@ export default async function NewRecipePage({
     error?: string;
   }>;
 }) {
+  const routeParams = (await params) ?? {};
+  const recipeCardId = String(routeParams.id ?? "").trim();
+
+  if (!recipeCardId) {
+    redirect(withQuery("/recipes", "error", "No se recibio la receta que deseas editar."));
+  }
+
   const sp = (await searchParams) ?? {};
   const requestedSiteId = String(sp.site_id ?? "").trim();
   const requestedAreaId = String(sp.area_id ?? "").trim();
@@ -687,7 +668,8 @@ export default async function NewRecipePage({
 
   const { supabase, user } = await requireAppAccess({
     appId: APP_ID,
-    returnTo: baseNewPath(
+    returnTo: baseEditPath(
+      recipeCardId,
       requestedSiteId,
       requestedAreaId,
       requestedProductId,
@@ -696,21 +678,39 @@ export default async function NewRecipePage({
     permissionCode: "production.recipes.manage",
   });
 
-  const [{ data: employeeSitesRows }, { data: employeeRow }] =
-    await Promise.all([
-      supabase
-        .from("employee_sites")
-        .select("site_id,is_primary")
-        .eq("employee_id", user.id)
-        .eq("is_active", true)
-        .order("is_primary", { ascending: false })
-        .limit(50),
-      supabase
-        .from("employees")
-        .select("site_id")
-        .eq("id", user.id)
-        .maybeSingle(),
-    ]);
+  const { data: recipeCardData, error: recipeCardErr } = await supabase
+    .from("recipe_cards")
+    .select(
+      "id,product_id,site_id,area_id,yield_qty,yield_unit,portion_size,portion_unit,prep_time_minutes,shelf_life_days,difficulty,recipe_description,process_config,status,is_active",
+    )
+    .eq("id", recipeCardId)
+    .maybeSingle();
+
+  if (recipeCardErr) {
+    redirect(withQuery("/recipes", "error", recipeCardErr.message));
+  }
+
+  const selectedRecipeCard = (recipeCardData as RecipeCardRow | null) ?? null;
+  if (!selectedRecipeCard) {
+    redirect(withQuery("/recipes", "error", "La receta que intentas editar no existe."));
+  }
+
+  const selectedProductId = String(selectedRecipeCard.product_id ?? "").trim();
+
+  const [{ data: employeeSitesRows }, { data: employeeRow }] = await Promise.all([
+    supabase
+      .from("employee_sites")
+      .select("site_id,is_primary")
+      .eq("employee_id", user.id)
+      .eq("is_active", true)
+      .order("is_primary", { ascending: false })
+      .limit(50),
+    supabase
+      .from("employees")
+      .select("site_id")
+      .eq("id", user.id)
+      .maybeSingle(),
+  ]);
 
   const employeeSiteIds = (
     (employeeSitesRows ?? []) as Array<{ site_id: string | null }>
@@ -729,14 +729,17 @@ export default async function NewRecipePage({
   const sites = (sitesData ?? []) as SiteOption[];
   const resolvedSiteId =
     requestedSiteId ||
+    selectedRecipeCard.site_id ||
     employeeSiteIds[0] ||
     String(employeeRow?.site_id ?? "").trim();
 
   const [
-    { data: recipeCardsData },
-    { data: productRows },
+    { data: allRecipeCardsData },
+    { data: selectedProductData },
     { data: ingredientRows },
     { data: unitsData },
+    { data: existingIngredientRows },
+    { data: existingStepsRows },
   ] = await Promise.all([
     supabase
       .from("recipe_cards")
@@ -748,10 +751,8 @@ export default async function NewRecipePage({
     supabase
       .from("products")
       .select("id,name,sku,unit,stock_unit_code,cost,product_type,is_active")
-      .in("product_type", ["preparacion", "venta"])
-      .eq("is_active", true)
-      .order("name", { ascending: true })
-      .limit(800),
+      .eq("id", selectedProductId)
+      .maybeSingle(),
     supabase
       .from("products")
       .select("id,name,sku,unit,stock_unit_code,cost,product_type,is_active")
@@ -765,59 +766,62 @@ export default async function NewRecipePage({
       .eq("is_active", true)
       .order("family", { ascending: true })
       .order("factor_to_base", { ascending: true }),
+    supabase
+      .from("recipes")
+      .select("id,ingredient_product_id,quantity")
+      .eq("product_id", selectedProductId)
+      .eq("is_active", true),
+    supabase
+      .from("recipe_steps")
+      .select("id,step_number,description,tip,time_minutes,image_path")
+      .eq("recipe_card_id", recipeCardId)
+      .order("step_number", { ascending: true }),
   ]);
 
-  const recipeCards = (recipeCardsData ?? []) as RecipeCardRow[];
-  const products = (productRows ?? []) as ProductOption[];
+  const recipeCards = (allRecipeCardsData ?? []) as RecipeCardRow[];
+  const selectedProduct = (selectedProductData as ProductOption | null) ?? null;
+  const products = selectedProduct ? [selectedProduct] : [];
   const ingredientOptions = (ingredientRows ?? []) as ProductOption[];
   const units = (unitsData ?? []) as UnitOption[];
 
-  const recipeProductIds = new Set(
-    recipeCards
-      .map((card) => String(card.product_id ?? "").trim())
-      .filter(Boolean),
-  );
-  const productsWithoutRecipe = products.filter(
-    (product) => !recipeProductIds.has(product.id),
-  );
-  const requestedProduct = requestedProductId
-    ? (products.find((product) => product.id === requestedProductId) ?? null)
-    : null;
-  const requestedProductHasRecipe = requestedProductId
-    ? recipeProductIds.has(requestedProductId)
-    : false;
-  const requestedProductIsAvailable = requestedProductId
-    ? productsWithoutRecipe.some((product) => product.id === requestedProductId)
-    : false;
+  const initialIngredientLines: IngredientLine[] = (
+    (existingIngredientRows ?? []) as Array<{
+      id: string;
+      ingredient_product_id: string;
+      quantity: number;
+    }>
+  ).map((row) => ({
+    id: row.id,
+    ingredient_product_id: row.ingredient_product_id,
+    quantity: Number(row.quantity),
+  }));
 
-  const selectedProductId = requestedProductIsAvailable
-    ? requestedProductId
-    : "";
-  const selectedProduct =
-    productsWithoutRecipe.find((row) => row.id === selectedProductId) ?? null;
-  const selectedRecipeCard: RecipeCardRow | null = null;
+  const initialSteps: RecipeStepLine[] = (
+    (existingStepsRows ?? []) as Array<{
+      id: string;
+      step_number: number;
+      description: string;
+      tip: string | null;
+      time_minutes: number | null;
+      image_path: string | null;
+    }>
+  ).map((row) => ({
+    id: row.id,
+    step_number: Number(row.step_number),
+    description: row.description ?? "",
+    tip: row.tip ?? "",
+    time_minutes: row.time_minutes ?? undefined,
+    step_image_url: row.image_path ?? "",
+  }));
 
-  const initialIngredientLines: IngredientLine[] = [];
-  const initialSteps: RecipeStepLine[] = [];
-
-  const defaultYieldUnit = selectedProduct?.unit || "un";
-  const formSiteId = requestedSiteId || resolvedSiteId;
-  const productSelectionWarning = requestedProductId
-    ? requestedProductHasRecipe
-      ? "Este producto ya tiene una receta asociada. Para cambiarla, entra desde la receta existente y usa edicion."
-      : requestedProduct
-        ? "No fue posible seleccionar este producto para nueva receta. Revisa que este activo y sea de tipo preparacion o venta."
-        : "El producto solicitado no existe o no esta disponible para crear receta."
-    : "";
+  const defaultYieldUnit = selectedRecipeCard.yield_unit || selectedProduct?.unit || "un";
+  const formSiteId = resolvedSiteId;
 
   let recipeAreasData: AreaOption[] = [];
   if (formSiteId) {
-    const { data: rpcAreasData } = await supabase.rpc(
-      "fogo_recipe_area_options",
-      {
-        p_site_id: formSiteId,
-      },
-    );
+    const { data: rpcAreasData } = await supabase.rpc("fogo_recipe_area_options", {
+      p_site_id: formSiteId,
+    });
     recipeAreasData = (rpcAreasData ?? []) as AreaOption[];
     if (recipeAreasData.length === 0) {
       const { data: fallbackAreasData } = await supabase
@@ -828,53 +832,55 @@ export default async function NewRecipePage({
       recipeAreasData = (fallbackAreasData ?? []) as AreaOption[];
     }
   }
+
   const areas = recipeAreasData
     .filter((area) => !isStandalonePanaderiaArea(area))
     .sort(sortProductionAreas);
 
   const formAreaId =
-    requestedAreaId && areas.some((area) => area.id === requestedAreaId)
+    (requestedAreaId && areas.some((area) => area.id === requestedAreaId)
       ? requestedAreaId
+      : "") ||
+    (selectedRecipeCard.area_id && areas.some((area) => area.id === selectedRecipeCard.area_id)
+      ? selectedRecipeCard.area_id
+      : "");
+
+  const productSelectionWarning =
+    requestedProductId && requestedProductId !== selectedProductId
+      ? "La edicion conserva el producto original de la receta. Para otro producto, crea una receta nueva."
       : "";
+
+  const inactiveProductWarning = selectedProduct && !selectedProduct.is_active
+    ? "El producto asociado a esta receta no esta activo. Puedes revisar la ficha, pero para guardar debe estar activo."
+    : "";
 
   return (
     <div className="space-y-6">
       <section className="ui-panel ui-panel--halo">
-        <h1 className="ui-h1">Nueva receta</h1>
+        <h1 className="ui-h1">Editar receta</h1>
         <p className="mt-2 ui-body-muted">
-          Crea una ficha tecnica solo para productos activos que todavia no
-          tienen receta asociada.
+          Actualiza la ficha tecnica, ingredientes (BOM) y pasos operativos de una receta existente.
         </p>
         {source === "nexo" ? (
           <div className="mt-3 ui-alert ui-alert--neutral">
-            Llegaste desde NEXO. Termina la receta aqui y quedara disponible
-            para produccion en FOGO.
+            Llegaste desde NEXO. Ajusta la receta aqui y quedara disponible para produccion en FOGO.
           </div>
         ) : null}
-        {error ? (
-          <div className="mt-3 ui-alert ui-alert--warn">{error}</div>
-        ) : null}
+        {error ? <div className="mt-3 ui-alert ui-alert--warn">{error}</div> : null}
         {productSelectionWarning ? (
-          <div className="mt-3 ui-alert ui-alert--warn">
-            {productSelectionWarning}
-          </div>
+          <div className="mt-3 ui-alert ui-alert--warn">{productSelectionWarning}</div>
         ) : null}
-        {productsWithoutRecipe.length === 0 ? (
-          <div className="mt-3 ui-alert ui-alert--neutral">
-            No hay productos activos de preparacion o venta pendientes por
-            receta.
-          </div>
+        {inactiveProductWarning ? (
+          <div className="mt-3 ui-alert ui-alert--warn">{inactiveProductWarning}</div>
         ) : null}
-        <div
-          id="fogo-recipe-client-error"
-          className="mt-3 ui-alert ui-alert--warn"
-          hidden
-        />
+        <div id="fogo-recipe-client-error" className="mt-3 ui-alert ui-alert--warn" hidden />
       </section>
 
       <RecipeFormSafetyScript />
 
       <form id="fogo-recipe-form" action={saveRecipe} className="space-y-6">
+        <input type="hidden" name="recipe_card_id" value={recipeCardId} />
+
         <section className="ui-panel space-y-5">
           <div className="grid gap-4 md:grid-cols-2">
             <input type="hidden" name="source" value={source || "fogo"} />
@@ -889,7 +895,7 @@ export default async function NewRecipePage({
                 name: area.name,
                 kind: area.kind,
               }))}
-              products={productsWithoutRecipe.map((product) => ({
+              products={products.map((product) => ({
                 id: product.id,
                 name: product.name,
                 sku: product.sku,
@@ -902,14 +908,13 @@ export default async function NewRecipePage({
 
             <label className="flex flex-col gap-1">
               <span className="ui-label">Estado</span>
-              <select name="status" defaultValue="draft" className="ui-input">
+              <select name="status" defaultValue={selectedRecipeCard.status ?? "draft"} className="ui-input">
                 <option value="draft">Borrador</option>
                 <option value="published">Publicada</option>
                 <option value="archived">Archivada</option>
               </select>
               <span className="text-xs text-[var(--ui-muted)]">
-                Para publicar: rendimiento + porcion completos, minimo 1
-                ingrediente y 1 paso.
+                Para publicar: rendimiento + porcion completos, minimo 1 ingrediente y 1 paso.
               </span>
             </label>
 
@@ -918,7 +923,7 @@ export default async function NewRecipePage({
                 type="checkbox"
                 name="is_active"
                 value="1"
-                defaultChecked
+                defaultChecked={selectedRecipeCard.is_active ?? true}
               />
               <span className="ui-label">Receta activa</span>
             </label>
@@ -926,16 +931,16 @@ export default async function NewRecipePage({
         </section>
 
         <RecipeBaseFields
-          key={`base-${selectedProductId || "new"}`}
-          initialYieldQty={1}
+          key={`base-${selectedProductId}-${recipeCardId}`}
+          initialYieldQty={selectedRecipeCard.yield_qty ?? 1}
           initialYieldUnit={defaultYieldUnit}
-          initialPortionSize={null}
-          initialPortionUnit={null}
-          initialPrepTimeMinutes={null}
-          initialShelfLifeDays={null}
-          initialDifficulty={null}
-          initialDescription={null}
-          initialProcessConfig={null}
+          initialPortionSize={selectedRecipeCard.portion_size ?? null}
+          initialPortionUnit={selectedRecipeCard.portion_unit ?? null}
+          initialPrepTimeMinutes={selectedRecipeCard.prep_time_minutes ?? null}
+          initialShelfLifeDays={selectedRecipeCard.shelf_life_days ?? null}
+          initialDifficulty={selectedRecipeCard.difficulty ?? null}
+          initialDescription={selectedRecipeCard.recipe_description ?? null}
+          initialProcessConfig={selectedRecipeCard.process_config ?? null}
           units={units}
           nexoCatalogUrl={
             selectedProductId
@@ -947,7 +952,7 @@ export default async function NewRecipePage({
         <section className="ui-panel space-y-4">
           <h2 className="ui-h2">Ingredientes (BOM)</h2>
           <RecipeIngredientsEditor
-            key={`bom-${selectedProductId || "new"}`}
+            key={`bom-${selectedProductId}-${recipeCardId}`}
             initialRows={initialIngredientLines}
             products={ingredientOptions}
           />
@@ -956,7 +961,7 @@ export default async function NewRecipePage({
         <section className="ui-panel space-y-4">
           <h2 className="ui-h2">Pasos de preparacion</h2>
           <RecipeStepsEditor
-            key={`steps-${selectedProductId || "new"}`}
+            key={`steps-${selectedProductId}-${recipeCardId}`}
             initialRows={initialSteps}
           />
         </section>
@@ -965,8 +970,8 @@ export default async function NewRecipePage({
           <div className="ui-panel flex flex-wrap items-center justify-end gap-2">
             <a
               href={
-                resolvedSiteId
-                  ? `/recipes?site_id=${encodeURIComponent(resolvedSiteId)}`
+                formSiteId
+                  ? `/recipes?site_id=${encodeURIComponent(formSiteId)}`
                   : "/recipes"
               }
               className="ui-btn ui-btn--ghost"
@@ -974,7 +979,7 @@ export default async function NewRecipePage({
               Cancelar
             </a>
             <button type="submit" className="ui-btn ui-btn--brand">
-              Guardar receta
+              Guardar cambios
             </button>
           </div>
         </section>

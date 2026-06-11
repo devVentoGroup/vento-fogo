@@ -133,7 +133,11 @@ function editRecipeHref(recipe: RecipeCardRow) {
   if (recipe.site_id) qs.set("site_id", recipe.site_id);
   if (recipe.area_id) qs.set("area_id", recipe.area_id);
   qs.set("product_id", recipe.product_id);
-  return `/recipes/new?${qs.toString()}`;
+
+  const query = qs.toString();
+  return query
+    ? `/recipes/${encodeURIComponent(recipe.id)}/edit?${query}`
+    : `/recipes/${encodeURIComponent(recipe.id)}/edit`;
 }
 
 function newRecipeHref(params: { siteId?: string | null; areaId?: string | null }) {

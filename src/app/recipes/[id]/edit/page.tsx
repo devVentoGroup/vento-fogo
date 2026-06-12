@@ -344,13 +344,13 @@ async function saveRecipe(formData: FormData) {
   let areaId = asText(formData.get("area_id"));
   const source = asText(formData.get("source"));
   const productId = asText(formData.get("product_id"));
-  const recipeSiteUses = parseRecipeSiteUses(formData);
-  const primaryUse = selectPrimaryRecipeUse(recipeSiteUses);
+  let recipeSiteUses = parseRecipeSiteUses(formData);
+  let primaryUse = selectPrimaryRecipeUse(recipeSiteUses);
   if (primaryUse) {
     siteId = primaryUse.siteId;
     areaId = primaryUse.areaId ?? "";
   }
-  const returnBase = baseEditPath(
+  let returnBase = baseEditPath(
     recipeCardId,
     siteId,
     areaId,
@@ -439,6 +439,167 @@ async function saveRecipe(formData: FormData) {
         "error",
         "Solo se permiten productos tipo preparacion o venta.",
       ),
+    );
+  }
+
+  const recipeUseLocationIds = Array.from(
+    new Set(
+      recipeSiteUses
+        .flatMap((use) => [
+          use.sourceLocationId,
+          use.destinationLocationId,
+        ])
+        .filter((value): value is string => Boolean(value)),
+    ),
+  );
+
+  let recipeUseLocationRows: Array<{
+    id: string;
+    site_id: string | null;
+    area_id: string | null;
+    is_active: boolean | null;
+  }> = [];
+
+  if (recipeUseLocationIds.length > 0) {
+    const { data: locationRows, error: locationRowsErr } = await supabase
+      .from("inventory_locations")
+      .select("id,site_id,area_id,is_active")
+      .in("id", recipeUseLocationIds);
+
+    if (locationRowsErr) {
+      redirect(withQuery(returnBase, "error", locationRowsErr.message));
+    }
+
+    recipeUseLocationRows = (locationRows ?? []) as typeof recipeUseLocationRows;
+  }
+
+  const recipeUseLocationById = new Map(
+    recipeUseLocationRows.map((location) => [location.id, location]),
+  );
+
+  recipeSiteUses = recipeSiteUses.map((use) => {
+    const sourceLocation = use.sourceLocationId
+      ? recipeUseLocationById.get(use.sourceLocationId)
+      : null;
+    const destinationLocation = use.destinationLocationId
+      ? recipeUseLocationById.get(use.destinationLocationId)
+      : null;
+
+    if (use.sourceLocationId && !sourceLocation) {
+      redirect(
+        withQuery(
+          returnBase,
+          "error",
+          "El LOC origen seleccionado no existe o no esta disponible.",
+        ),
+      );
+    }
+
+    if (use.destinationLocationId && !destinationLocation) {
+      redirect(
+        withQuery(
+          returnBase,
+          "error",
+          "El LOC destino seleccionado no existe o no esta disponible.",
+        ),
+      );
+    }
+
+    if (
+      sourceLocation?.site_id &&
+      String(sourceLocation.site_id) !== use.siteId
+    ) {
+      redirect(
+        withQuery(
+          returnBase,
+          "error",
+          "El LOC origen seleccionado pertenece a otra sede.",
+        ),
+      );
+    }
+
+    if (
+      destinationLocation?.site_id &&
+      String(destinationLocation.site_id) !== use.siteId
+    ) {
+      redirect(
+        withQuery(
+          returnBase,
+          "error",
+          "El LOC destino seleccionado pertenece a otra sede.",
+        ),
+      );
+    }
+
+    const sourceAreaId = sourceLocation?.area_id
+      ? String(sourceLocation.area_id)
+      : "";
+    const destinationAreaId = destinationLocation?.area_id
+      ? String(destinationLocation.area_id)
+      : "";
+
+    if (use.usageMode === "no_inventory") {
+      return {
+        ...use,
+        areaId: null,
+        sourceLocationId: null,
+        destinationLocationId: null,
+      };
+    }
+
+    if (
+      use.usageMode === "stored_for_production" ||
+      use.usageMode === "sells_finished_good"
+    ) {
+      return {
+        ...use,
+        areaId: sourceAreaId || null,
+        destinationLocationId: null,
+      };
+    }
+
+    if (
+      use.areaId &&
+      sourceAreaId &&
+      sourceAreaId !== use.areaId
+    ) {
+      redirect(
+        withQuery(
+          returnBase,
+          "error",
+          "El LOC origen no pertenece al area del uso. Cambia el area o selecciona un LOC de esa area.",
+        ),
+      );
+    }
+
+    if (
+      use.usageMode === "produces_here" &&
+      use.areaId &&
+      destinationAreaId &&
+      destinationAreaId !== use.areaId
+    ) {
+      redirect(
+        withQuery(
+          returnBase,
+          "error",
+          "El LOC destino no pertenece al area del uso. Cambia el area o selecciona un LOC de esa area.",
+        ),
+      );
+    }
+
+    return use;
+  });
+
+  primaryUse = selectPrimaryRecipeUse(recipeSiteUses);
+  if (primaryUse) {
+    siteId = primaryUse.siteId;
+    areaId = primaryUse.areaId ?? "";
+    returnBase = baseEditPath(
+      recipeCardId,
+      siteId,
+      areaId,
+      productId,
+      source,
     );
   }
 
@@ -1169,6 +1330,43 @@ export default async function EditRecipePage({
     map.set(location.site_id, list);
     return map;
   }, new Map<string, InventoryLocationOption[]>());
+  const areaNameById = new Map(
+    allAreas.map((area) => [area.id, areaLabel(area)]),
+  );
+  const locationOptionLabel = (location: InventoryLocationOption) => {
+    const areaName = location.area_id
+      ? areaNameById.get(location.area_id)
+      : "";
+    return areaName
+      ? `${locationLabel(location)} · ${areaName}`
+      : `${locationLabel(location)} · Sin area`;
+  };
+  const locationOptionsForArea = (
+    locations: InventoryLocationOption[],
+    selectedAreaId: string,
+    selectedLocationId: string,
+  ) => {
+    const selected = locations.find((location) => location.id === selectedLocationId);
+    if (!selectedAreaId) return locations;
+
+    const matching = locations.filter(
+      (location) => String(location.area_id ?? "") === selectedAreaId,
+    );
+    const unassigned = locations.filter((location) => !location.area_id);
+
+    if (matching.length > 0) {
+      const options = [...matching, ...unassigned];
+      if (selected && !options.some((location) => location.id === selected.id)) {
+        options.push(selected);
+      }
+      return options;
+    }
+
+    if (locations.length === 1) return locations;
+    if (selected) return [selected, ...locations.filter((location) => location.id !== selected.id)];
+
+    return locations;
+  };
 
   const initialIngredientLines: IngredientLine[] = (
     (existingIngredientRows ?? []) as Array<{
@@ -1395,7 +1593,19 @@ export default async function EditRecipePage({
 
           <div className="grid gap-4 lg:grid-cols-2">
             {recipeUseRows.length ? (
-              recipeUseRows.map((row) => (
+              recipeUseRows.map((row) => {
+                const sourceLocationOptions = locationOptionsForArea(
+                  row.locations,
+                  row.selectedAreaId,
+                  row.selectedSourceLocationId,
+                );
+                const destinationLocationOptions = locationOptionsForArea(
+                  row.locations,
+                  row.selectedAreaId,
+                  row.selectedDestinationLocationId,
+                );
+
+                return (
                 <div
                   key={row.site.id}
                   className="rounded-2xl border border-[var(--ui-border)] bg-white p-4 shadow-sm"
@@ -1490,14 +1700,14 @@ export default async function EditRecipePage({
                           aria-label={`LOC origen de ${siteLabel(row.site)}`}
                         >
                           <option value="">Sin LOC</option>
-                          {row.locations.map((location) => (
+                          {sourceLocationOptions.map((location) => (
                             <option key={location.id} value={location.id}>
-                              {locationLabel(location)}
+                              {locationOptionLabel(location)}
                             </option>
                           ))}
                         </select>
                         <span className="block text-xs text-[var(--ui-muted)]">
-                          {row.locations.length} LOC(s)
+                          {sourceLocationOptions.length} LOC(s) disponible(s)
                         </span>
                       </label>
 
@@ -1510,9 +1720,9 @@ export default async function EditRecipePage({
                           aria-label={`LOC destino de ${siteLabel(row.site)}`}
                         >
                           <option value="">Sin LOC</option>
-                          {row.locations.map((location) => (
+                          {destinationLocationOptions.map((location) => (
                             <option key={location.id} value={location.id}>
-                              {locationLabel(location)}
+                              {locationOptionLabel(location)}
                             </option>
                           ))}
                         </select>
@@ -1523,7 +1733,8 @@ export default async function EditRecipePage({
                     </div>
                   </div>
                 </div>
-              ))
+                );
+              })
             ) : (
               <div className="rounded-2xl border border-[var(--ui-border)] bg-white px-4 py-8 text-center text-[var(--ui-muted)]">
                 No hay sedes disponibles para configurar.

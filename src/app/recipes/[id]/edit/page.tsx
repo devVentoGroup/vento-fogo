@@ -103,12 +103,20 @@ type ProductSiteSettingRow = {
   is_active: boolean;
   local_production_enabled: boolean | null;
   sales_enabled: boolean | null;
+  inventory_enabled?: boolean | null;
   production_location_id: string | null;
 };
 
+type RecipeSiteUseMode =
+  | "produces_here"
+  | "sells_finished_good"
+  | "prepares_to_order"
+  | "stored_for_production"
+  | "no_inventory";
+
 type RecipeSiteUseInput = {
   siteId: string;
-  usageMode: "produces_here" | "sells_finished_good" | "prepares_to_order" | "no_inventory";
+  usageMode: RecipeSiteUseMode;
   areaId: string | null;
   sourceLocationId: string | null;
   destinationLocationId: string | null;
@@ -236,7 +244,9 @@ function baseEditPath(
   if (productId) qs.set("product_id", productId);
   if (source) qs.set("source", source);
   const query = qs.toString();
-  const base = recipeId ? `/recipes/${encodeURIComponent(recipeId)}/edit` : "/recipes";
+  const base = recipeId
+    ? `/recipes/${encodeURIComponent(recipeId)}/edit`
+    : "/recipes";
   return query ? `${base}?${query}` : base;
 }
 
@@ -249,7 +259,13 @@ function parseRecipeSiteUses(formData: FormData): RecipeSiteUseInput[] {
         .filter(Boolean),
     ),
   );
-  const validModes = new Set(["produces_here", "sells_finished_good", "prepares_to_order", "no_inventory"]);
+  const validModes = new Set<string>([
+  "produces_here",
+  "sells_finished_good",
+  "prepares_to_order",
+  "stored_for_production",
+  "no_inventory",
+]);
 
   return siteIds.flatMap((siteId) => {
     if (asText(formData.get(`site_use_enabled_${siteId}`)) !== "1") return [];
@@ -261,8 +277,10 @@ function parseRecipeSiteUses(formData: FormData): RecipeSiteUseInput[] {
         siteId,
         usageMode: usageMode as RecipeSiteUseInput["usageMode"],
         areaId: asText(formData.get(`site_use_area_${siteId}`)) || null,
-        sourceLocationId: asText(formData.get(`site_use_source_loc_${siteId}`)) || null,
-        destinationLocationId: asText(formData.get(`site_use_destination_loc_${siteId}`)) || null,
+        sourceLocationId:
+          asText(formData.get(`site_use_source_loc_${siteId}`)) || null,
+        destinationLocationId:
+          asText(formData.get(`site_use_destination_loc_${siteId}`)) || null,
       },
     ];
   });
@@ -270,7 +288,11 @@ function parseRecipeSiteUses(formData: FormData): RecipeSiteUseInput[] {
 
 function selectPrimaryRecipeUse(uses: RecipeSiteUseInput[]) {
   return (
-    uses.find((use) => use.usageMode === "produces_here" || use.usageMode === "prepares_to_order") ??
+    uses.find(
+      (use) =>
+        use.usageMode === "produces_here" ||
+        use.usageMode === "prepares_to_order",
+    ) ??
     uses[0] ??
     null
   );
@@ -294,7 +316,24 @@ function usageLabel(mode: string) {
   if (mode === "produces_here") return "Se produce aqui";
   if (mode === "sells_finished_good") return "Se vende terminado";
   if (mode === "prepares_to_order") return "Se prepara al momento";
+  if (mode === "stored_for_production") return "Se almacena y se consume";
   return "No maneja inventario";
+}
+
+function usageHelp(mode: string) {
+  if (mode === "produces_here") {
+    return "Fabrica este producto: descuenta ingredientes desde LOC origen y recibe terminado en LOC destino.";
+  }
+  if (mode === "sells_finished_good") {
+    return "Sale como producto terminado para venta directa desde el LOC origen.";
+  }
+  if (mode === "prepares_to_order") {
+    return "Se prepara y se vende en el momento: consume ingredientes desde el LOC origen.";
+  }
+  if (mode === "stored_for_production") {
+    return "No se produce ni se vende aqui: se guarda y luego se consume como ingrediente de otras recetas.";
+  }
+  return "La sede no recibe ni descuenta este producto.";
 }
 
 async function saveRecipe(formData: FormData) {
@@ -311,7 +350,13 @@ async function saveRecipe(formData: FormData) {
     siteId = primaryUse.siteId;
     areaId = primaryUse.areaId ?? "";
   }
-  const returnBase = baseEditPath(recipeCardId, siteId, areaId, productId, source);
+  const returnBase = baseEditPath(
+    recipeCardId,
+    siteId,
+    areaId,
+    productId,
+    source,
+  );
 
   const { supabase } = await requireAppAccess({
     appId: APP_ID,
@@ -320,7 +365,13 @@ async function saveRecipe(formData: FormData) {
   });
 
   if (!recipeCardId) {
-    redirect(withQuery("/recipes", "error", "No se recibio la receta que deseas editar."));
+    redirect(
+      withQuery(
+        "/recipes",
+        "error",
+        "No se recibio la receta que deseas editar.",
+      ),
+    );
   }
 
   const { data: currentRecipeCard, error: currentRecipeErr } = await supabase
@@ -334,13 +385,21 @@ async function saveRecipe(formData: FormData) {
   }
 
   if (!currentRecipeCard?.id) {
-    redirect(withQuery("/recipes", "error", "La receta que intentas editar no existe."));
+    redirect(
+      withQuery(
+        "/recipes",
+        "error",
+        "La receta que intentas editar no existe.",
+      ),
+    );
   }
 
   const currentProductId = String(currentRecipeCard.product_id ?? "").trim();
 
   if (!productId) {
-    redirect(withQuery(returnBase, "error", "La receta no tiene producto asociado."));
+    redirect(
+      withQuery(returnBase, "error", "La receta no tiene producto asociado."),
+    );
   }
 
   if (productId !== currentProductId) {
@@ -361,22 +420,35 @@ async function saveRecipe(formData: FormData) {
   const productRow = (product as ProductOption | null) ?? null;
 
   if (!productRow || !productRow.is_active) {
-    redirect(withQuery(returnBase, "error", "El producto seleccionado no esta activo."));
+    redirect(
+      withQuery(
+        returnBase,
+        "error",
+        "El producto seleccionado no esta activo.",
+      ),
+    );
   }
 
   const productType = String(productRow.product_type ?? "")
     .trim()
     .toLowerCase();
   if (!["preparacion", "venta"].includes(productType)) {
-    redirect(withQuery(returnBase, "error", "Solo se permiten productos tipo preparacion o venta."));
+    redirect(
+      withQuery(
+        returnBase,
+        "error",
+        "Solo se permiten productos tipo preparacion o venta.",
+      ),
+    );
   }
 
-  const { data: duplicateRecipeCard, error: duplicateRecipeErr } = await supabase
-    .from("recipe_cards")
-    .select("id")
-    .eq("product_id", productId)
-    .neq("id", recipeCardId)
-    .maybeSingle();
+  const { data: duplicateRecipeCard, error: duplicateRecipeErr } =
+    await supabase
+      .from("recipe_cards")
+      .select("id")
+      .eq("product_id", productId)
+      .neq("id", recipeCardId)
+      .maybeSingle();
 
   if (duplicateRecipeErr) {
     redirect(withQuery(returnBase, "error", duplicateRecipeErr.message));
@@ -398,7 +470,9 @@ async function saveRecipe(formData: FormData) {
     try {
       ingredientLines = JSON.parse(ingredientRaw) as IngredientLine[];
     } catch {
-      redirect(withQuery(returnBase, "error", "Formato inválido en ingredientes."));
+      redirect(
+        withQuery(returnBase, "error", "Formato inválido en ingredientes."),
+      );
     }
   }
 
@@ -449,40 +523,108 @@ async function saveRecipe(formData: FormData) {
   const status: "draft" | "published" | "archived" =
     statusRaw === "published" || statusRaw === "archived" ? statusRaw : "draft";
   const yieldQty = asPositive(formData.get("yield_qty"), 1);
-  const yieldUnit = asText(formData.get("yield_unit")) || productRow.unit || "un";
+  const yieldUnit =
+    asText(formData.get("yield_unit")) || productRow.unit || "un";
   const portionSize = asNullableNumber(formData.get("portion_size"));
   const portionUnit = asText(formData.get("portion_unit")) || null;
 
   if (status === "published") {
     if (recipeSiteUses.length <= 0) {
-      redirect(withQuery(returnBase, "error", "Para publicar debes seleccionar al menos una sede donde aplica la receta."));
+      redirect(
+        withQuery(
+          returnBase,
+          "error",
+          "Para publicar debes seleccionar al menos una sede donde aplica la receta.",
+        ),
+      );
     }
     if (!siteId || !areaId) {
-      redirect(withQuery(returnBase, "error", "Para publicar debes seleccionar una sede productiva o de preparacion con area."));
+      redirect(
+        withQuery(
+          returnBase,
+          "error",
+          "Para publicar debes seleccionar una sede productiva o de preparacion con area.",
+        ),
+      );
     }
     if (!yieldQty || yieldQty <= 0 || !yieldUnit) {
-      redirect(withQuery(returnBase, "error", "Para publicar debes completar rendimiento y unidad."));
+      redirect(
+        withQuery(
+          returnBase,
+          "error",
+          "Para publicar debes completar rendimiento y unidad.",
+        ),
+      );
     }
     if (!portionSize || portionSize <= 0 || !portionUnit) {
-      redirect(withQuery(returnBase, "error", "Para publicar debes completar porcion y unidad de porcion."));
+      redirect(
+        withQuery(
+          returnBase,
+          "error",
+          "Para publicar debes completar porcion y unidad de porcion.",
+        ),
+      );
     }
     if (normalizedIngredients.length <= 0) {
-      redirect(withQuery(returnBase, "error", "Para publicar debes tener al menos 1 ingrediente activo en BOM."));
+      redirect(
+        withQuery(
+          returnBase,
+          "error",
+          "Para publicar debes tener al menos 1 ingrediente activo en BOM.",
+        ),
+      );
     }
     if (normalizedStepDraft.length <= 0) {
-      redirect(withQuery(returnBase, "error", "Para publicar debes tener al menos 1 paso de preparacion."));
+      redirect(
+        withQuery(
+          returnBase,
+          "error",
+          "Para publicar debes tener al menos 1 paso de preparacion.",
+        ),
+      );
     }
   }
 
   for (const use of recipeSiteUses) {
-    if ((use.usageMode === "produces_here" || use.usageMode === "prepares_to_order") && (!use.areaId || !use.sourceLocationId)) {
-      redirect(withQuery(returnBase, "error", "Las sedes que producen o preparan al momento necesitan area y LOC de ingredientes."));
+    if (
+      (use.usageMode === "produces_here" ||
+        use.usageMode === "prepares_to_order") &&
+      (!use.areaId || !use.sourceLocationId)
+    ) {
+      redirect(
+        withQuery(
+          returnBase,
+          "error",
+          "Las sedes que producen o preparan al momento necesitan area y LOC de ingredientes.",
+        ),
+      );
     }
     if (use.usageMode === "produces_here" && !use.destinationLocationId) {
-      redirect(withQuery(returnBase, "error", "Las sedes que producen aqui necesitan LOC destino para el producto terminado."));
+      redirect(
+        withQuery(
+          returnBase,
+          "error",
+          "Las sedes que producen aqui necesitan LOC destino para el producto terminado.",
+        ),
+      );
     }
     if (use.usageMode === "sells_finished_good" && !use.sourceLocationId) {
-      redirect(withQuery(returnBase, "error", "Las sedes que venden terminado necesitan LOC de salida."));
+      redirect(
+        withQuery(
+          returnBase,
+          "error",
+          "Las sedes que venden terminado necesitan LOC de salida.",
+        ),
+      );
+    }
+    if (use.usageMode === "stored_for_production" && !use.sourceLocationId) {
+      redirect(
+        withQuery(
+          returnBase,
+          "error",
+          "Las sedes que almacenan para producir necesitan LOC donde queda disponible para consumo.",
+        ),
+      );
     }
   }
 
@@ -491,9 +633,17 @@ async function saveRecipe(formData: FormData) {
       ? await supabase.rpc("fogo_recipe_area_options", { p_site_id: siteId })
       : { data: [] as AreaOption[] };
     const area =
-      ((validAreas ?? []) as AreaOption[]).find((option) => option.id === areaId) ?? null;
+      ((validAreas ?? []) as AreaOption[]).find(
+        (option) => option.id === areaId,
+      ) ?? null;
     if (!area) {
-      redirect(withQuery(returnBase, "error", "Selecciona un area productiva valida para el recetario."));
+      redirect(
+        withQuery(
+          returnBase,
+          "error",
+          "Selecciona un area productiva valida para el recetario.",
+        ),
+      );
     }
   }
 
@@ -536,7 +686,8 @@ async function saveRecipe(formData: FormData) {
     shelf_life_days: asNullableNumber(formData.get("shelf_life_days")),
     difficulty: asText(formData.get("difficulty")) || null,
     recipe_description: asText(formData.get("recipe_description")) || null,
-    process_config: parseJsonObject(asText(formData.get("process_config"))) ?? {},
+    process_config:
+      parseJsonObject(asText(formData.get("process_config"))) ?? {},
     status,
     is_active: asText(formData.get("is_active")) === "1",
   };
@@ -583,16 +734,24 @@ async function saveRecipe(formData: FormData) {
       .from("product_site_settings")
       .upsert(
         recipeSiteUses.map((use) => {
-          const producesLocally = use.usageMode === "produces_here" || use.usageMode === "prepares_to_order";
-          const sells = use.usageMode === "sells_finished_good" || use.usageMode === "prepares_to_order";
+          const producesLocally =
+            use.usageMode === "produces_here" ||
+            use.usageMode === "prepares_to_order";
+          const sells =
+            use.usageMode === "sells_finished_good" ||
+            use.usageMode === "prepares_to_order";
+          const keepsInventory = use.usageMode !== "no_inventory";
+
           return {
             product_id: productId,
             site_id: use.siteId,
-            is_active: true,
+            is_active: keepsInventory,
             local_production_enabled: producesLocally,
             sales_enabled: sells || null,
-            inventory_enabled: use.usageMode !== "no_inventory",
-            production_location_id: producesLocally ? use.sourceLocationId : null,
+            inventory_enabled: keepsInventory,
+            production_location_id: producesLocally
+              ? use.sourceLocationId
+              : null,
           };
         }),
         { onConflict: "product_id,site_id" },
@@ -651,7 +810,9 @@ async function saveRecipe(formData: FormData) {
     }, 0);
 
     const yieldQtyRaw = Number(recipePayload.yield_qty ?? 0);
-    const yieldUnitCode = normalizeUnitCode(String(recipePayload.yield_unit ?? ""));
+    const yieldUnitCode = normalizeUnitCode(
+      String(recipePayload.yield_unit ?? ""),
+    );
     const stockUnitCode = normalizeUnitCode(
       String(productRow.stock_unit_code ?? productRow.unit ?? ""),
     );
@@ -814,7 +975,13 @@ export default async function EditRecipePage({
   const recipeCardId = String(routeParams.id ?? "").trim();
 
   if (!recipeCardId) {
-    redirect(withQuery("/recipes", "error", "No se recibio la receta que deseas editar."));
+    redirect(
+      withQuery(
+        "/recipes",
+        "error",
+        "No se recibio la receta que deseas editar.",
+      ),
+    );
   }
 
   const sp = (await searchParams) ?? {};
@@ -852,25 +1019,32 @@ export default async function EditRecipePage({
 
   const selectedRecipeCard = (recipeCardData as RecipeCardRow | null) ?? null;
   if (!selectedRecipeCard) {
-    redirect(withQuery("/recipes", "error", "La receta que intentas editar no existe."));
+    redirect(
+      withQuery(
+        "/recipes",
+        "error",
+        "La receta que intentas editar no existe.",
+      ),
+    );
   }
 
   const selectedProductId = String(selectedRecipeCard.product_id ?? "").trim();
 
-  const [{ data: employeeSitesRows }, { data: employeeRow }] = await Promise.all([
-    supabase
-      .from("employee_sites")
-      .select("site_id,is_primary")
-      .eq("employee_id", user.id)
-      .eq("is_active", true)
-      .order("is_primary", { ascending: false })
-      .limit(50),
-    supabase
-      .from("employees")
-      .select("site_id")
-      .eq("id", user.id)
-      .maybeSingle(),
-  ]);
+  const [{ data: employeeSitesRows }, { data: employeeRow }] =
+    await Promise.all([
+      supabase
+        .from("employee_sites")
+        .select("site_id,is_primary")
+        .eq("employee_id", user.id)
+        .eq("is_active", true)
+        .order("is_primary", { ascending: false })
+        .limit(50),
+      supabase
+        .from("employees")
+        .select("site_id")
+        .eq("id", user.id)
+        .maybeSingle(),
+    ]);
 
   const employeeSiteIds = (
     (employeeSitesRows ?? []) as Array<{ site_id: string | null }>
@@ -934,12 +1108,16 @@ export default async function EditRecipePage({
       .order("step_number", { ascending: true }),
     supabase
       .from("recipe_site_uses")
-      .select("id,recipe_card_id,product_id,site_id,usage_mode,area_id,source_location_id,destination_location_id,is_active")
+      .select(
+        "id,recipe_card_id,product_id,site_id,usage_mode,area_id,source_location_id,destination_location_id,is_active",
+      )
       .eq("recipe_card_id", recipeCardId)
       .eq("is_active", true),
     supabase
       .from("product_site_settings")
-      .select("site_id,product_id,is_active,local_production_enabled,sales_enabled,production_location_id")
+      .select(
+        "site_id,product_id,is_active,local_production_enabled,sales_enabled,inventory_enabled,production_location_id",
+      )
       .eq("product_id", selectedProductId),
     employeeSiteIds.length
       ? supabase
@@ -951,7 +1129,9 @@ export default async function EditRecipePage({
     employeeSiteIds.length
       ? supabase
           .from("inventory_locations")
-          .select("id,site_id,area_id,code,zone,description,location_type,is_active")
+          .select(
+            "id,site_id,area_id,code,zone,description,location_type,is_active",
+          )
           .in("site_id", employeeSiteIds)
           .eq("is_active", true)
           .order("code", { ascending: true })
@@ -962,13 +1142,19 @@ export default async function EditRecipePage({
   const ingredientOptions = (ingredientRows ?? []) as ProductOption[];
   const units = (unitsData ?? []) as UnitOption[];
   const recipeSiteUses = (recipeSiteUsesData ?? []) as RecipeSiteUseRow[];
-  const productSiteSettings = (productSiteSettingsData ?? []) as ProductSiteSettingRow[];
+  const productSiteSettings = (productSiteSettingsData ??
+    []) as ProductSiteSettingRow[];
   const allAreas = ((allAreasData ?? []) as AreaOption[])
     .filter((area) => !isStandalonePanaderiaArea(area))
     .sort(sortProductionAreas);
-  const inventoryLocations = (inventoryLocationsData ?? []) as InventoryLocationOption[];
-  const recipeSiteUseBySiteId = new Map(recipeSiteUses.map((use) => [use.site_id, use]));
-  const productSiteSettingBySiteId = new Map(productSiteSettings.map((setting) => [setting.site_id, setting]));
+  const inventoryLocations = (inventoryLocationsData ??
+    []) as InventoryLocationOption[];
+  const recipeSiteUseBySiteId = new Map(
+    recipeSiteUses.map((use) => [use.site_id, use]),
+  );
+  const productSiteSettingBySiteId = new Map(
+    productSiteSettings.map((setting) => [setting.site_id, setting]),
+  );
   const areasBySiteId = allAreas.reduce((map, area) => {
     const key = String(area.site_id ?? "");
     if (!key) return map;
@@ -1014,14 +1200,18 @@ export default async function EditRecipePage({
     step_image_url: row.image_path ?? "",
   }));
 
-  const defaultYieldUnit = selectedRecipeCard.yield_unit || selectedProduct?.unit || "un";
+  const defaultYieldUnit =
+    selectedRecipeCard.yield_unit || selectedProduct?.unit || "un";
   const formSiteId = resolvedSiteId;
 
   let recipeAreasData: AreaOption[] = [];
   if (formSiteId) {
-    const { data: rpcAreasData } = await supabase.rpc("fogo_recipe_area_options", {
-      p_site_id: formSiteId,
-    });
+    const { data: rpcAreasData } = await supabase.rpc(
+      "fogo_recipe_area_options",
+      {
+        p_site_id: formSiteId,
+      },
+    );
     recipeAreasData = (rpcAreasData ?? []) as AreaOption[];
     if (recipeAreasData.length === 0) {
       const { data: fallbackAreasData } = await supabase
@@ -1041,7 +1231,8 @@ export default async function EditRecipePage({
     (requestedAreaId && areas.some((area) => area.id === requestedAreaId)
       ? requestedAreaId
       : "") ||
-    (selectedRecipeCard.area_id && areas.some((area) => area.id === selectedRecipeCard.area_id)
+    (selectedRecipeCard.area_id &&
+    areas.some((area) => area.id === selectedRecipeCard.area_id)
       ? selectedRecipeCard.area_id
       : "");
 
@@ -1057,13 +1248,26 @@ export default async function EditRecipePage({
           ? "produces_here"
           : setting?.sales_enabled
             ? "sells_finished_good"
-            : "sells_finished_good");
-    const enabled = Boolean(existingUse?.is_active || isCurrentRecipeSite || setting?.local_production_enabled || setting?.sales_enabled);
+            : setting?.inventory_enabled
+              ? "stored_for_production"
+              : "stored_for_production");
+    const enabled = Boolean(
+      existingUse?.is_active ||
+      isCurrentRecipeSite ||
+      setting?.local_production_enabled ||
+      setting?.sales_enabled ||
+      setting?.inventory_enabled,
+    );
     const siteAreas = areasBySiteId.get(site.id) ?? [];
     const siteLocations = locationsBySiteId.get(site.id) ?? [];
-    const selectedAreaId = existingUse?.area_id ?? (isCurrentRecipeSite ? selectedRecipeCard.area_id : null) ?? "";
-    const selectedSourceLocationId = existingUse?.source_location_id ?? setting?.production_location_id ?? "";
-    const selectedDestinationLocationId = existingUse?.destination_location_id ?? "";
+    const selectedAreaId =
+      existingUse?.area_id ??
+      (isCurrentRecipeSite ? selectedRecipeCard.area_id : null) ??
+      "";
+    const selectedSourceLocationId =
+      existingUse?.source_location_id ?? setting?.production_location_id ?? "";
+    const selectedDestinationLocationId =
+      existingUse?.destination_location_id ?? "";
 
     return {
       site,
@@ -1082,30 +1286,43 @@ export default async function EditRecipePage({
       ? "La edición conserva el producto original de la receta. Para otro producto, crea una receta nueva."
       : "";
 
-  const inactiveProductWarning = selectedProduct && !selectedProduct.is_active
-    ? "El producto asociado a esta receta no esta activo. Puedes revisar la ficha, pero para guardar debe estar activo."
-    : "";
+  const inactiveProductWarning =
+    selectedProduct && !selectedProduct.is_active
+      ? "El producto asociado a esta receta no esta activo. Puedes revisar la ficha, pero para guardar debe estar activo."
+      : "";
 
   return (
     <div className="space-y-6">
       <section className="ui-panel ui-panel--halo">
         <h1 className="ui-h1">Editar receta</h1>
         <p className="mt-2 ui-body-muted">
-          Actualiza la ficha tecnica, ingredientes (BOM) y pasos operativos de una receta existente.
+          Actualiza la ficha tecnica, ingredientes (BOM) y pasos operativos de
+          una receta existente.
         </p>
         {source === "nexo" ? (
           <div className="mt-3 ui-alert ui-alert--neutral">
-            Llegaste desde NEXO. Ajusta la receta aqui y quedara disponible para produccion en FOGO.
+            Llegaste desde NEXO. Ajusta la receta aqui y quedara disponible para
+            produccion en FOGO.
           </div>
         ) : null}
-        {error ? <div className="mt-3 ui-alert ui-alert--warn">{error}</div> : null}
+        {error ? (
+          <div className="mt-3 ui-alert ui-alert--warn">{error}</div>
+        ) : null}
         {productSelectionWarning ? (
-          <div className="mt-3 ui-alert ui-alert--warn">{productSelectionWarning}</div>
+          <div className="mt-3 ui-alert ui-alert--warn">
+            {productSelectionWarning}
+          </div>
         ) : null}
         {inactiveProductWarning ? (
-          <div className="mt-3 ui-alert ui-alert--warn">{inactiveProductWarning}</div>
+          <div className="mt-3 ui-alert ui-alert--warn">
+            {inactiveProductWarning}
+          </div>
         ) : null}
-        <div id="fogo-recipe-client-error" className="mt-3 ui-alert ui-alert--warn" hidden />
+        <div
+          id="fogo-recipe-client-error"
+          className="mt-3 ui-alert ui-alert--warn"
+          hidden
+        />
       </section>
 
       <RecipeFormSafetyScript />
@@ -1126,19 +1343,27 @@ export default async function EditRecipePage({
                 {selectedProduct?.name ?? "Producto"}
               </div>
               <div className="mt-1 text-xs text-[var(--ui-muted)]">
-                {selectedProduct?.sku ? `SKU ${selectedProduct.sku}` : "Sin SKU"} - {selectedProduct?.product_type ?? "tipo no definido"}
+                {selectedProduct?.sku
+                  ? `SKU ${selectedProduct.sku}`
+                  : "Sin SKU"}{" "}
+                - {selectedProduct?.product_type ?? "tipo no definido"}
               </div>
             </div>
 
             <label className="flex flex-col gap-1">
               <span className="ui-label">Estado</span>
-              <select name="status" defaultValue={selectedRecipeCard.status ?? "draft"} className="ui-input">
+              <select
+                name="status"
+                defaultValue={selectedRecipeCard.status ?? "draft"}
+                className="ui-input"
+              >
                 <option value="draft">Borrador</option>
                 <option value="published">Publicada</option>
                 <option value="archived">Archivada</option>
               </select>
               <span className="text-xs text-[var(--ui-muted)]">
-                Para publicar: rendimiento + porcion completos, minimo 1 ingrediente y 1 paso.
+                Para publicar: rendimiento + porcion completos, minimo 1
+                ingrediente y 1 paso.
               </span>
             </label>
 
@@ -1159,114 +1384,152 @@ export default async function EditRecipePage({
             <div>
               <h2 className="ui-h2">Usos por sede</h2>
               <p className="mt-1 max-w-3xl text-sm text-[var(--ui-muted)]">
-                Define donde se produce, se vende terminado o se prepara al momento esta misma receta.
+                Define donde se produce, se almacena, se consume o se vende esta
+                misma receta.
               </p>
             </div>
-            <span className="ui-chip">{recipeUseRows.filter((row) => row.enabled).length} activa(s)</span>
+            <span className="ui-chip">
+              {recipeUseRows.filter((row) => row.enabled).length} activa(s)
+            </span>
           </div>
 
-          <div className="overflow-hidden rounded-2xl border border-[var(--ui-border)]">
-            <table className="min-w-full divide-y divide-[var(--ui-border)] text-sm">
-              <thead className="bg-[var(--ui-surface-2)]">
-                <tr>
-                  <th className="px-4 py-3 text-left font-semibold">Sede</th>
-                  <th className="px-4 py-3 text-left font-semibold">Uso</th>
-                  <th className="px-4 py-3 text-left font-semibold">Area</th>
-                  <th className="px-4 py-3 text-left font-semibold">LOC origen</th>
-                  <th className="px-4 py-3 text-left font-semibold">LOC destino</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[var(--ui-border)] bg-white">
-                {recipeUseRows.length ? (
-                  recipeUseRows.map((row) => (
-                    <tr key={row.site.id}>
-                      <td className="px-4 py-3 align-top">
-                        <input type="hidden" name="site_use_site_id" value={row.site.id} />
-                        <label className="flex items-start gap-2">
-                          <input
-                            type="checkbox"
-                            name={`site_use_enabled_${row.site.id}`}
-                            value="1"
-                            defaultChecked={row.enabled}
-                            className="mt-1"
-                          />
-                          <span>
-                            <span className="block font-medium text-[var(--ui-text)]">{siteLabel(row.site)}</span>
-                            <span className="mt-1 block text-xs text-[var(--ui-muted)]">{row.site.site_type ?? "sede"}</span>
+          <div className="overflow-hidden rounded-2xl border border-[var(--ui-border)] bg-white">
+            <div className="hidden grid-cols-[minmax(160px,1fr)_minmax(220px,1.2fr)_minmax(180px,1fr)_minmax(220px,1.2fr)_minmax(220px,1.2fr)] gap-3 border-b border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-4 py-3 text-sm font-semibold text-[var(--ui-text)] xl:grid">
+              <div>Sede</div>
+              <div>Uso</div>
+              <div>Area</div>
+              <div>LOC origen</div>
+              <div>LOC destino</div>
+            </div>
+
+            <div className="divide-y divide-[var(--ui-border)]">
+              {recipeUseRows.length ? (
+                recipeUseRows.map((row) => (
+                  <div
+                    key={row.site.id}
+                    className="grid gap-4 p-4 xl:grid-cols-[minmax(160px,1fr)_minmax(220px,1.2fr)_minmax(180px,1fr)_minmax(220px,1.2fr)_minmax(220px,1.2fr)] xl:items-start"
+                  >
+                    <div className="min-w-0">
+                      <input
+                        type="hidden"
+                        name="site_use_site_id"
+                        value={row.site.id}
+                      />
+                      <label className="flex items-start gap-2">
+                        <input
+                          type="checkbox"
+                          name={`site_use_enabled_${row.site.id}`}
+                          value="1"
+                          defaultChecked={row.enabled}
+                          className="mt-1"
+                        />
+                        <span className="min-w-0">
+                          <span className="block truncate font-medium text-[var(--ui-text)]">
+                            {siteLabel(row.site)}
                           </span>
-                        </label>
-                      </td>
-                      <td className="px-4 py-3 align-top">
-                        <select
-                          name={`site_use_mode_${row.site.id}`}
-                          defaultValue={row.usageMode}
-                          className="ui-input min-w-44 bg-white"
-                          aria-label={`Uso de ${siteLabel(row.site)}`}
-                        >
-                          <option value="produces_here">{usageLabel("produces_here")}</option>
-                          <option value="sells_finished_good">{usageLabel("sells_finished_good")}</option>
-                          <option value="prepares_to_order">{usageLabel("prepares_to_order")}</option>
-                          <option value="no_inventory">{usageLabel("no_inventory")}</option>
-                        </select>
-                      </td>
-                      <td className="px-4 py-3 align-top">
-                        <select
-                          name={`site_use_area_${row.site.id}`}
-                          defaultValue={row.selectedAreaId}
-                          className="ui-input min-w-44 bg-white"
-                          aria-label={`Area de ${siteLabel(row.site)}`}
-                        >
-                          <option value="">Sin area</option>
-                          {row.areas.map((area) => (
-                            <option key={area.id} value={area.id}>
-                              {areaLabel(area)}
-                            </option>
-                          ))}
-                        </select>
-                        <div className="mt-1 text-xs text-[var(--ui-muted)]">{row.areas.length} area(s)</div>
-                      </td>
-                      <td className="px-4 py-3 align-top">
-                        <select
-                          name={`site_use_source_loc_${row.site.id}`}
-                          defaultValue={row.selectedSourceLocationId}
-                          className="ui-input min-w-52 bg-white"
-                          aria-label={`LOC origen de ${siteLabel(row.site)}`}
-                        >
-                          <option value="">Sin LOC</option>
-                          {row.locations.map((location) => (
-                            <option key={location.id} value={location.id}>
-                              {locationLabel(location)}
-                            </option>
-                          ))}
-                        </select>
-                        <div className="mt-1 text-xs text-[var(--ui-muted)]">{row.locations.length} LOC(s)</div>
-                      </td>
-                      <td className="px-4 py-3 align-top">
-                        <select
-                          name={`site_use_destination_loc_${row.site.id}`}
-                          defaultValue={row.selectedDestinationLocationId}
-                          className="ui-input min-w-52 bg-white"
-                          aria-label={`LOC destino de ${siteLabel(row.site)}`}
-                        >
-                          <option value="">Sin LOC</option>
-                          {row.locations.map((location) => (
-                            <option key={location.id} value={location.id}>
-                              {locationLabel(location)}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-[var(--ui-muted)]">
-                      No hay sedes disponibles para configurar.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+                          <span className="mt-1 block text-xs text-[var(--ui-muted)]">
+                            {row.site.site_type ?? "sede"}
+                          </span>
+                        </span>
+                      </label>
+                    </div>
+
+                    <label className="min-w-0 space-y-1">
+                      <span className="ui-label xl:hidden">Uso</span>
+                      <select
+                        name={`site_use_mode_${row.site.id}`}
+                        defaultValue={row.usageMode}
+                        className="ui-input w-full bg-white"
+                        aria-label={`Uso de ${siteLabel(row.site)}`}
+                      >
+                        <option value="produces_here">
+                          {usageLabel("produces_here")}
+                        </option>
+                        <option value="stored_for_production">
+                          {usageLabel("stored_for_production")}
+                        </option>
+                        <option value="sells_finished_good">
+                          {usageLabel("sells_finished_good")}
+                        </option>
+                        <option value="prepares_to_order">
+                          {usageLabel("prepares_to_order")}
+                        </option>
+                        <option value="no_inventory">
+                          {usageLabel("no_inventory")}
+                        </option>
+                      </select>
+                      <span className="block text-xs leading-4 text-[var(--ui-muted)]">
+                        {usageHelp(row.usageMode)}
+                      </span>
+                    </label>
+
+                    <label className="min-w-0 space-y-1">
+                      <span className="ui-label xl:hidden">Area</span>
+                      <select
+                        name={`site_use_area_${row.site.id}`}
+                        defaultValue={row.selectedAreaId}
+                        className="ui-input w-full bg-white"
+                        aria-label={`Area de ${siteLabel(row.site)}`}
+                      >
+                        <option value="">Sin area</option>
+                        {row.areas.map((area) => (
+                          <option key={area.id} value={area.id}>
+                            {areaLabel(area)}
+                          </option>
+                        ))}
+                      </select>
+                      <span className="block text-xs text-[var(--ui-muted)]">
+                        {row.areas.length} area(s)
+                      </span>
+                    </label>
+
+                    <label className="min-w-0 space-y-1">
+                      <span className="ui-label xl:hidden">LOC origen</span>
+                      <select
+                        name={`site_use_source_loc_${row.site.id}`}
+                        defaultValue={row.selectedSourceLocationId}
+                        className="ui-input w-full bg-white"
+                        aria-label={`LOC origen de ${siteLabel(row.site)}`}
+                      >
+                        <option value="">Sin LOC</option>
+                        {row.locations.map((location) => (
+                          <option key={location.id} value={location.id}>
+                            {locationLabel(location)}
+                          </option>
+                        ))}
+                      </select>
+                      <span className="block text-xs text-[var(--ui-muted)]">
+                        {row.locations.length} LOC(s)
+                      </span>
+                    </label>
+
+                    <label className="min-w-0 space-y-1">
+                      <span className="ui-label xl:hidden">LOC destino</span>
+                      <select
+                        name={`site_use_destination_loc_${row.site.id}`}
+                        defaultValue={row.selectedDestinationLocationId}
+                        className="ui-input w-full bg-white"
+                        aria-label={`LOC destino de ${siteLabel(row.site)}`}
+                      >
+                        <option value="">Sin LOC</option>
+                        {row.locations.map((location) => (
+                          <option key={location.id} value={location.id}>
+                            {locationLabel(location)}
+                          </option>
+                        ))}
+                      </select>
+                      <span className="block text-xs text-[var(--ui-muted)]">
+                        Solo aplica cuando la sede produce este item.
+                      </span>
+                    </label>
+                  </div>
+                ))
+              ) : (
+                <div className="px-4 py-8 text-center text-[var(--ui-muted)]">
+                  No hay sedes disponibles para configurar.
+                </div>
+              )}
+            </div>
           </div>
         </section>
 

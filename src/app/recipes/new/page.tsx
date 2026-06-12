@@ -197,6 +197,24 @@ function baseNewPath(
   return query ? `/recipes/new?${query}` : "/recipes/new";
 }
 
+function recipeEditPath(
+  recipeCardId: string,
+  siteId: string,
+  areaId: string,
+  productId: string,
+  source: string,
+) {
+  const recipeId = recipeCardId.trim();
+  const qs = new URLSearchParams();
+  if (siteId) qs.set("site_id", siteId);
+  if (areaId) qs.set("area_id", areaId);
+  if (productId) qs.set("product_id", productId);
+  if (source) qs.set("source", source);
+  const query = qs.toString();
+  const base = recipeId ? `/recipes/${encodeURIComponent(recipeId)}/edit` : "/recipes";
+  return query ? `${base}?${query}` : base;
+}
+
 async function saveRecipe(formData: FormData) {
   "use server";
 
@@ -443,9 +461,9 @@ async function saveRecipe(formData: FormData) {
   if (existingCard?.id) {
     redirect(
       withQuery(
-        returnBase,
+        recipeEditPath(String(existingCard.id), siteId, areaId, productId, source),
         "error",
-        "Este producto ya tiene una receta asociada. Usa la página de edición de recetas existentes.",
+        "Este producto ya tiene una receta asociada. Te enviamos a la edición de la receta existente.",
       ),
     );
   }
@@ -695,6 +713,38 @@ export default async function NewRecipePage({
     ),
     permissionCode: "production.recipes.manage",
   });
+
+  if (requestedProductId) {
+    const { data: existingRecipeCard, error: existingRecipeCardError } = await supabase
+      .from("recipe_cards")
+      .select("id,site_id,area_id")
+      .eq("product_id", requestedProductId)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (existingRecipeCardError) {
+      redirect(
+        withQuery(
+          baseNewPath(requestedSiteId, requestedAreaId, requestedProductId, source),
+          "error",
+          existingRecipeCardError.message,
+        ),
+      );
+    }
+
+    if (existingRecipeCard?.id) {
+      redirect(
+        recipeEditPath(
+          String(existingRecipeCard.id),
+          requestedSiteId || String(existingRecipeCard.site_id ?? ""),
+          requestedAreaId || String(existingRecipeCard.area_id ?? ""),
+          requestedProductId,
+          source,
+        ),
+      );
+    }
+  }
 
   const [{ data: employeeSitesRows }, { data: employeeRow }] =
     await Promise.all([

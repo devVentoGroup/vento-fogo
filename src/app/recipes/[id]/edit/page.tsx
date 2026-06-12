@@ -1434,7 +1434,34 @@ export default async function EditRecipePage({
       ? selectedRecipeCard.area_id
       : "");
 
-  const recipeUseRows = sites.map((site) => {
+  const siteById = new Map(sites.map((site) => [site.id, site]));
+  const configuredSiteIds = new Set(
+    productSiteSettings
+      .filter(
+        (setting) =>
+          setting.is_active ||
+          setting.local_production_enabled ||
+          setting.sales_enabled ||
+          setting.inventory_enabled,
+      )
+      .map((setting) => setting.site_id)
+      .filter(Boolean),
+  );
+  const visibleRecipeUseSiteIds = new Set<string>();
+
+  for (const siteId of configuredSiteIds) visibleRecipeUseSiteIds.add(siteId);
+  for (const use of recipeSiteUses) visibleRecipeUseSiteIds.add(use.site_id);
+  if (selectedRecipeCard.site_id) visibleRecipeUseSiteIds.add(selectedRecipeCard.site_id);
+  if (resolvedSiteId) visibleRecipeUseSiteIds.add(resolvedSiteId);
+
+  const visibleRecipeUseSites = Array.from(visibleRecipeUseSiteIds)
+    .map((siteId) => siteById.get(siteId))
+    .filter((site): site is SiteOption => Boolean(site))
+    .sort((a, b) => siteLabel(a).localeCompare(siteLabel(b), "es"));
+
+  const recipeUseSites = visibleRecipeUseSites.length > 0 ? visibleRecipeUseSites : sites;
+
+  const recipeUseRows = recipeUseSites.map((site) => {
     const existingUse = recipeSiteUseBySiteId.get(site.id) ?? null;
     const setting = productSiteSettingBySiteId.get(site.id) ?? null;
     const isCurrentRecipeSite = selectedRecipeCard.site_id === site.id;

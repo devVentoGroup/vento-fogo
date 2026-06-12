@@ -260,12 +260,12 @@ function parseRecipeSiteUses(formData: FormData): RecipeSiteUseInput[] {
     ),
   );
   const validModes = new Set<string>([
-  "produces_here",
-  "sells_finished_good",
-  "prepares_to_order",
-  "stored_for_production",
-  "no_inventory",
-]);
+    "produces_here",
+    "sells_finished_good",
+    "prepares_to_order",
+    "stored_for_production",
+    "no_inventory",
+  ]);
 
   return siteIds.flatMap((siteId) => {
     if (asText(formData.get(`site_use_enabled_${siteId}`)) !== "1") return [];
@@ -1393,49 +1393,46 @@ export default async function EditRecipePage({
             </span>
           </div>
 
-          <div className="overflow-hidden rounded-2xl border border-[var(--ui-border)] bg-white">
-            <div className="hidden grid-cols-[minmax(160px,1fr)_minmax(220px,1.2fr)_minmax(180px,1fr)_minmax(220px,1.2fr)_minmax(220px,1.2fr)] gap-3 border-b border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-4 py-3 text-sm font-semibold text-[var(--ui-text)] xl:grid">
-              <div>Sede</div>
-              <div>Uso</div>
-              <div>Area</div>
-              <div>LOC origen</div>
-              <div>LOC destino</div>
-            </div>
+          <div className="grid gap-4 lg:grid-cols-2">
+            {recipeUseRows.length ? (
+              recipeUseRows.map((row) => (
+                <div
+                  key={row.site.id}
+                  className="rounded-2xl border border-[var(--ui-border)] bg-white p-4 shadow-sm"
+                >
+                  <input
+                    type="hidden"
+                    name="site_use_site_id"
+                    value={row.site.id}
+                  />
 
-            <div className="divide-y divide-[var(--ui-border)]">
-              {recipeUseRows.length ? (
-                recipeUseRows.map((row) => (
-                  <div
-                    key={row.site.id}
-                    className="grid gap-4 p-4 xl:grid-cols-[minmax(160px,1fr)_minmax(220px,1.2fr)_minmax(180px,1fr)_minmax(220px,1.2fr)_minmax(220px,1.2fr)] xl:items-start"
-                  >
-                    <div className="min-w-0">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <label className="flex min-w-0 flex-1 items-start gap-3">
                       <input
-                        type="hidden"
-                        name="site_use_site_id"
-                        value={row.site.id}
+                        type="checkbox"
+                        name={`site_use_enabled_${row.site.id}`}
+                        value="1"
+                        defaultChecked={row.enabled}
+                        className="mt-1"
                       />
-                      <label className="flex items-start gap-2">
-                        <input
-                          type="checkbox"
-                          name={`site_use_enabled_${row.site.id}`}
-                          value="1"
-                          defaultChecked={row.enabled}
-                          className="mt-1"
-                        />
-                        <span className="min-w-0">
-                          <span className="block truncate font-medium text-[var(--ui-text)]">
-                            {siteLabel(row.site)}
-                          </span>
-                          <span className="mt-1 block text-xs text-[var(--ui-muted)]">
-                            {row.site.site_type ?? "sede"}
-                          </span>
+                      <span className="min-w-0">
+                        <span className="block font-semibold text-[var(--ui-text)]">
+                          {siteLabel(row.site)}
                         </span>
-                      </label>
-                    </div>
+                        <span className="mt-1 block text-xs text-[var(--ui-muted)]">
+                          {row.site.site_type ?? "sede"}
+                        </span>
+                      </span>
+                    </label>
 
-                    <label className="min-w-0 space-y-1">
-                      <span className="ui-label xl:hidden">Uso</span>
+                    <span className={`ui-chip ${row.enabled ? "ui-chip--success" : ""}`}>
+                      {row.enabled ? "Activa" : "Inactiva"}
+                    </span>
+                  </div>
+
+                  <div className="mt-4 space-y-3">
+                    <label className="block space-y-1">
+                      <span className="ui-label">Uso operativo</span>
                       <select
                         name={`site_use_mode_${row.site.id}`}
                         defaultValue={row.usageMode}
@@ -1458,78 +1455,80 @@ export default async function EditRecipePage({
                           {usageLabel("no_inventory")}
                         </option>
                       </select>
-                      <span className="block text-xs leading-4 text-[var(--ui-muted)]">
+                      <span className="block text-xs leading-5 text-[var(--ui-muted)]">
                         {usageHelp(row.usageMode)}
                       </span>
                     </label>
 
-                    <label className="min-w-0 space-y-1">
-                      <span className="ui-label xl:hidden">Area</span>
-                      <select
-                        name={`site_use_area_${row.site.id}`}
-                        defaultValue={row.selectedAreaId}
-                        className="ui-input w-full bg-white"
-                        aria-label={`Area de ${siteLabel(row.site)}`}
-                      >
-                        <option value="">Sin area</option>
-                        {row.areas.map((area) => (
-                          <option key={area.id} value={area.id}>
-                            {areaLabel(area)}
-                          </option>
-                        ))}
-                      </select>
-                      <span className="block text-xs text-[var(--ui-muted)]">
-                        {row.areas.length} area(s)
-                      </span>
-                    </label>
+                    <div className="grid gap-3 md:grid-cols-3">
+                      <label className="block min-w-0 space-y-1">
+                        <span className="ui-label">Área</span>
+                        <select
+                          name={`site_use_area_${row.site.id}`}
+                          defaultValue={row.selectedAreaId}
+                          className="ui-input w-full bg-white"
+                          aria-label={`Área de ${siteLabel(row.site)}`}
+                        >
+                          <option value="">Sin área</option>
+                          {row.areas.map((area) => (
+                            <option key={area.id} value={area.id}>
+                              {areaLabel(area)}
+                            </option>
+                          ))}
+                        </select>
+                        <span className="block text-xs text-[var(--ui-muted)]">
+                          {row.areas.length} área(s)
+                        </span>
+                      </label>
 
-                    <label className="min-w-0 space-y-1">
-                      <span className="ui-label xl:hidden">LOC origen</span>
-                      <select
-                        name={`site_use_source_loc_${row.site.id}`}
-                        defaultValue={row.selectedSourceLocationId}
-                        className="ui-input w-full bg-white"
-                        aria-label={`LOC origen de ${siteLabel(row.site)}`}
-                      >
-                        <option value="">Sin LOC</option>
-                        {row.locations.map((location) => (
-                          <option key={location.id} value={location.id}>
-                            {locationLabel(location)}
-                          </option>
-                        ))}
-                      </select>
-                      <span className="block text-xs text-[var(--ui-muted)]">
-                        {row.locations.length} LOC(s)
-                      </span>
-                    </label>
+                      <label className="block min-w-0 space-y-1">
+                        <span className="ui-label">LOC origen / salida</span>
+                        <select
+                          name={`site_use_source_loc_${row.site.id}`}
+                          defaultValue={row.selectedSourceLocationId}
+                          className="ui-input w-full bg-white"
+                          aria-label={`LOC origen de ${siteLabel(row.site)}`}
+                        >
+                          <option value="">Sin LOC</option>
+                          {row.locations.map((location) => (
+                            <option key={location.id} value={location.id}>
+                              {locationLabel(location)}
+                            </option>
+                          ))}
+                        </select>
+                        <span className="block text-xs text-[var(--ui-muted)]">
+                          {row.locations.length} LOC(s)
+                        </span>
+                      </label>
 
-                    <label className="min-w-0 space-y-1">
-                      <span className="ui-label xl:hidden">LOC destino</span>
-                      <select
-                        name={`site_use_destination_loc_${row.site.id}`}
-                        defaultValue={row.selectedDestinationLocationId}
-                        className="ui-input w-full bg-white"
-                        aria-label={`LOC destino de ${siteLabel(row.site)}`}
-                      >
-                        <option value="">Sin LOC</option>
-                        {row.locations.map((location) => (
-                          <option key={location.id} value={location.id}>
-                            {locationLabel(location)}
-                          </option>
-                        ))}
-                      </select>
-                      <span className="block text-xs text-[var(--ui-muted)]">
-                        Solo aplica cuando la sede produce este item.
-                      </span>
-                    </label>
+                      <label className="block min-w-0 space-y-1">
+                        <span className="ui-label">LOC destino</span>
+                        <select
+                          name={`site_use_destination_loc_${row.site.id}`}
+                          defaultValue={row.selectedDestinationLocationId}
+                          className="ui-input w-full bg-white"
+                          aria-label={`LOC destino de ${siteLabel(row.site)}`}
+                        >
+                          <option value="">Sin LOC</option>
+                          {row.locations.map((location) => (
+                            <option key={location.id} value={location.id}>
+                              {locationLabel(location)}
+                            </option>
+                          ))}
+                        </select>
+                        <span className="block text-xs text-[var(--ui-muted)]">
+                          Solo requerido cuando esta sede produce el item.
+                        </span>
+                      </label>
+                    </div>
                   </div>
-                ))
-              ) : (
-                <div className="px-4 py-8 text-center text-[var(--ui-muted)]">
-                  No hay sedes disponibles para configurar.
                 </div>
-              )}
-            </div>
+              ))
+            ) : (
+              <div className="rounded-2xl border border-[var(--ui-border)] bg-white px-4 py-8 text-center text-[var(--ui-muted)]">
+                No hay sedes disponibles para configurar.
+              </div>
+            )}
           </div>
         </section>
 

@@ -17,6 +17,16 @@ const APP_ID = "fogo";
 const NEXO_BASE_URL =
   process.env.NEXT_PUBLIC_NEXO_URL?.replace(/\/$/, "") ||
   "https://nexo.ventogroup.co";
+const RECIPE_STEP_PHOTOS_BUCKET =
+  process.env.FOGO_RECIPE_STEP_PHOTOS_BUCKET ||
+  process.env.NEXT_PUBLIC_FOGO_RECIPE_STEP_PHOTOS_BUCKET ||
+  "recipe-step-photos";
+const MAX_RECIPE_STEP_PHOTO_BYTES = 1500 * 1024;
+const ALLOWED_RECIPE_STEP_PHOTO_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+]);
 
 type ProductOption = {
   id: string;
@@ -152,6 +162,69 @@ function normalizeSlug(value: string | null | undefined) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "");
+}
+
+function normalizeStoredImageValue(value: unknown) {
+  const imageValue = String(value ?? "").trim();
+  return imageValue || null;
+}
+
+function fileExtensionFromMime(file: File) {
+  if (file.type === "image/png") return "png";
+  if (file.type === "image/webp") return "webp";
+  return "jpg";
+}
+
+function asRecipeStepImageFile(value: FormDataEntryValue | null) {
+  if (!(value instanceof File)) return null;
+  if (!value.name || value.size <= 0) return null;
+  return value;
+}
+
+async function uploadRecipeStepPhoto({
+  supabase,
+  recipeCardId,
+  stepNumber,
+  file,
+}: {
+  supabase: Awaited<ReturnType<typeof requireAppAccess>>["supabase"];
+  recipeCardId: string;
+  stepNumber: number;
+  file: File;
+}) {
+  if (!ALLOWED_RECIPE_STEP_PHOTO_TYPES.has(file.type)) {
+    throw new Error("La foto del paso debe ser JPG, PNG o WEBP.");
+  }
+
+  if (file.size > MAX_RECIPE_STEP_PHOTO_BYTES) {
+    throw new Error("La foto del paso supera 1.5 MB después de optimizarla. Usa una imagen más liviana.");
+  }
+
+  const extension = fileExtensionFromMime(file);
+  const safeRecipeId = normalizeSlug(recipeCardId) || recipeCardId.replace(/[^a-zA-Z0-9_-]/g, "");
+  const objectPath = [
+    "recipes",
+    safeRecipeId,
+    `step-${stepNumber}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${extension}`,
+  ].join("/");
+
+  const { error: uploadError } = await supabase.storage
+    .from(RECIPE_STEP_PHOTOS_BUCKET)
+    .upload(objectPath, file, {
+      contentType: file.type || "image/jpeg",
+      cacheControl: "31536000",
+      upsert: false,
+    });
+
+  if (uploadError) {
+    throw new Error(`No se pudo subir la foto del paso ${stepNumber}: ${uploadError.message}`);
+  }
+
+  const { data } = supabase.storage
+    .from(RECIPE_STEP_PHOTOS_BUCKET)
+    .getPublicUrl(objectPath);
+
+  return data.publicUrl || objectPath;
 }
 
 function isStandalonePanaderiaArea(area: AreaOption) {
@@ -662,21 +735,33 @@ async function saveRecipe(formData: FormData) {
 
   const normalizedStepDraft = steps
     .filter((step) => !step._delete)
-    .map((step) => ({
-      description: String(step.description ?? "").trim(),
-      tip: String(step.tip ?? "").trim() || null,
-      time_minutes:
-        Number.isFinite(Number(step.time_minutes)) &&
-        Number(step.time_minutes) >= 0
-          ? Number(step.time_minutes)
-          : null,
-      image_path: String(step.step_image_url ?? "").trim() || null,
-      original_order:
-        Number.isFinite(Number(step.step_number)) &&
-        Number(step.step_number) > 0
-          ? Number(step.step_number)
-          : 9999,
-    }))
+    .map((step) => {
+      const id = String(step.id ?? "").trim();
+      const clientKey =
+        String(step.client_key ?? "").trim() ||
+        (id ? `existing-${id}` : `step-${String(step.step_number ?? "").trim() || "new"}`);
+
+      return {
+        id: id || null,
+        client_key: clientKey,
+        description: String(step.description ?? "").trim(),
+        tip: String(step.tip ?? "").trim() || null,
+        time_minutes:
+          Number.isFinite(Number(step.time_minutes)) &&
+          Number(step.time_minutes) >= 0
+            ? Number(step.time_minutes)
+            : null,
+        image_path: normalizeStoredImageValue(
+          step.step_image_path ?? step.step_image_url,
+        ),
+        remove_image: step.remove_image === true,
+        original_order:
+          Number.isFinite(Number(step.step_number)) &&
+          Number(step.step_number) > 0
+            ? Number(step.step_number)
+            : 9999,
+      };
+    })
     .filter((step) => step.description.length > 0)
     .sort((a, b) => a.original_order - b.original_order);
 
@@ -1031,14 +1116,80 @@ async function saveRecipe(formData: FormData) {
     }
   }
 
-  const normalizedSteps = normalizedStepDraft.map((step, index) => ({
-    recipe_card_id: recipeCardId,
-    step_number: index + 1,
-    description: step.description,
-    tip: step.tip,
-    time_minutes: step.time_minutes,
-    image_path: step.image_path,
-  }));
+  const { data: existingStepImageRows, error: existingStepImageErr } =
+    await supabase
+      .from("recipe_steps")
+      .select("id,image_path")
+      .eq("recipe_card_id", recipeCardId);
+
+  if (existingStepImageErr) {
+    redirect(withQuery(returnBase, "error", existingStepImageErr.message));
+  }
+
+  const existingImagePathByStepId = new Map<string, string | null>();
+  for (const row of (existingStepImageRows ?? []) as Array<{
+    id: string | null;
+    image_path: string | null;
+  }>) {
+    const stepId = String(row.id ?? "").trim();
+    if (stepId) {
+      existingImagePathByStepId.set(
+        stepId,
+        normalizeStoredImageValue(row.image_path),
+      );
+    }
+  }
+
+  const normalizedSteps: Array<{
+    recipe_card_id: string;
+    step_number: number;
+    description: string;
+    tip: string | null;
+    time_minutes: number | null;
+    image_path: string | null;
+  }> = [];
+
+  for (const [index, step] of normalizedStepDraft.entries()) {
+    const stepNumber = index + 1;
+    const uploadedFile = asRecipeStepImageFile(
+      formData.get(`recipe_step_image_${step.client_key}`),
+    );
+
+    let imagePath =
+      step.id && existingImagePathByStepId.has(step.id)
+        ? existingImagePathByStepId.get(step.id) ?? null
+        : step.image_path;
+
+    if (step.remove_image) {
+      imagePath = null;
+    }
+
+    if (uploadedFile) {
+      try {
+        imagePath = await uploadRecipeStepPhoto({
+          supabase,
+          recipeCardId,
+          stepNumber,
+          file: uploadedFile,
+        });
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "No se pudo subir la foto del paso.";
+        redirect(withQuery(returnBase, "error", message));
+      }
+    }
+
+    normalizedSteps.push({
+      recipe_card_id: recipeCardId,
+      step_number: stepNumber,
+      description: step.description,
+      tip: step.tip,
+      time_minutes: step.time_minutes,
+      image_path: imagePath,
+    });
+  }
 
   const { error: deleteStepsErr } = await supabase
     .from("recipe_steps")

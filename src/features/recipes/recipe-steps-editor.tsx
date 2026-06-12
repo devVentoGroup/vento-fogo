@@ -21,8 +21,100 @@ type Props = {
   initialRows: RecipeStepLine[];
 };
 
+const MAX_STEP_IMAGE_DIMENSION = 1400;
+const TARGET_STEP_IMAGE_BYTES = 700 * 1024;
+const MAX_STEP_IMAGE_UPLOAD_BYTES = 1500 * 1024;
+const STEP_IMAGE_QUALITY = 0.78;
+const STEP_IMAGE_MIME = "image/webp";
+
 function newClientKey() {
   return `tmp-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function isDisplayableImageUrl(value: string | null | undefined) {
+  const url = String(value ?? "").trim();
+  return /^https?:\/\//i.test(url) || url.startsWith("/");
+}
+
+function formatBytes(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 KB";
+  if (bytes < 1024 * 1024) return `${Math.ceil(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function loadImage(file: File) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("No se pudo leer la imagen."));
+    };
+    image.src = url;
+  });
+}
+
+function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality: number) {
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (blob) resolve(blob);
+        else reject(new Error("No se pudo optimizar la imagen."));
+      },
+      type,
+      quality,
+    );
+  });
+}
+
+async function optimizeStepImageFile(file: File) {
+  const image = await loadImage(file);
+  const scale = Math.min(1, MAX_STEP_IMAGE_DIMENSION / Math.max(image.width, image.height));
+  const width = Math.max(1, Math.round(image.width * scale));
+  const height = Math.max(1, Math.round(image.height * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+
+  const context = canvas.getContext("2d", { alpha: false });
+  if (!context) throw new Error("No se pudo preparar la imagen.");
+  context.drawImage(image, 0, 0, width, height);
+
+  const webpBlob = await canvasToBlob(canvas, STEP_IMAGE_MIME, STEP_IMAGE_QUALITY);
+  const optimizedBlob =
+    webpBlob.size < file.size || file.size > TARGET_STEP_IMAGE_BYTES
+      ? webpBlob
+      : file;
+
+  if (optimizedBlob.size > MAX_STEP_IMAGE_UPLOAD_BYTES) {
+    throw new Error(
+      `La foto optimizada queda en ${formatBytes(optimizedBlob.size)}. Usa una imagen más liviana.`,
+    );
+  }
+
+  const extension = optimizedBlob.type === "image/webp" ? "webp" : file.name.split(".").pop() || "jpg";
+  const baseName = file.name.replace(/\.[^.]+$/, "") || "paso";
+  return new File([optimizedBlob], `${baseName}.${extension}`, {
+    type: optimizedBlob.type || file.type || "image/jpeg",
+    lastModified: Date.now(),
+  });
+}
+
+async function optimizeFileInputImage(input: HTMLInputElement) {
+  const file = input.files?.[0] ?? null;
+  if (!file) return null;
+
+  const optimized = await optimizeStepImageFile(file);
+  if (optimized === file) return optimized;
+
+  const transfer = new DataTransfer();
+  transfer.items.add(optimized);
+  input.files = transfer.files;
+  return optimized;
 }
 
 function withClientKey(step: RecipeStepLine, index: number): RecipeStepLine {
@@ -118,7 +210,9 @@ export function RecipeStepsEditor({
           const realIndex = steps.findIndex((s) => s === step);
           const visIndex = sortedVisible.indexOf(step);
           const clientKey = step.client_key ?? `step-${step.step_number}`;
-          const hasSavedPhoto = Boolean(step.step_image_path && !step.remove_image);
+          const savedPhotoValue = String(step.step_image_url ?? step.step_image_path ?? "").trim();
+          const hasSavedPhoto = Boolean(savedPhotoValue && !step.remove_image);
+          const displayablePhotoUrl = isDisplayableImageUrl(savedPhotoValue) ? savedPhotoValue : "";
           return (
             <div key={clientKey} className="ui-panel-soft p-4 space-y-3">
               <div className="flex items-center justify-between gap-3">
@@ -199,12 +293,26 @@ export function RecipeStepsEditor({
                     name={`recipe_step_image_${clientKey}`}
                     accept="image/jpeg,image/png,image/webp"
                     className="ui-input"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0] ?? null;
-                      updateStep(realIndex, {
-                        pending_image_name: file?.name ?? "",
-                        remove_image: file ? false : step.remove_image,
-                      });
+                    onChange={async (e) => {
+                      try {
+                        const file = await optimizeFileInputImage(e.currentTarget);
+                        updateStep(realIndex, {
+                          pending_image_name: file
+                            ? `${file.name} (${formatBytes(file.size)})`
+                            : "",
+                          remove_image: file ? false : step.remove_image,
+                        });
+                      } catch (error) {
+                        e.currentTarget.value = "";
+                        const message =
+                          error instanceof Error
+                            ? error.message
+                            : "No se pudo optimizar la foto.";
+                        updateStep(realIndex, {
+                          pending_image_name: message,
+                          remove_image: step.remove_image,
+                        });
+                      }
                     }}
                   />
                   <div className="space-y-1 text-xs text-[var(--ui-muted)]">
@@ -212,13 +320,25 @@ export function RecipeStepsEditor({
                       <p>Esta receta ya tiene una foto guardada para este paso.</p>
                     ) : null}
                     {step.pending_image_name ? (
-                      <p>Nueva foto seleccionada: {step.pending_image_name}</p>
+                      <p>Nueva foto seleccionada: {step.pending_image_name}. Se subirá cuando guardes la receta.</p>
                     ) : null}
                     {step.remove_image ? (
-                      <p>La foto guardada se eliminara cuando guardes la receta.</p>
+                      <p>La foto guardada se eliminará cuando guardes la receta.</p>
                     ) : null}
-                    <p>Formatos permitidos: JPG, PNG o WEBP. Maximo recomendado: 8 MB.</p>
+                    <p>Formatos permitidos: JPG, PNG o WEBP. Se optimiza automáticamente antes de subir.</p>
                   </div>
+                  {displayablePhotoUrl && hasSavedPhoto ? (
+                    <div className="overflow-hidden rounded-xl border border-[var(--ui-border)] bg-white">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={displayablePhotoUrl}
+                        alt={`Foto del paso ${step.step_number}`}
+                        className="max-h-64 w-full object-cover"
+                        loading="lazy"
+                        decoding="async"
+                      />
+                    </div>
+                  ) : null}
                   {hasSavedPhoto ? (
                     <div>
                       <button

@@ -1496,6 +1496,7 @@ export default async function EditRecipePage({
 
   const [
     { data: selectedProductData },
+    { data: outputProductRows },
     { data: ingredientRows },
     { data: unitsData },
     { data: existingIngredientRows },
@@ -1511,6 +1512,13 @@ export default async function EditRecipePage({
       .select("id,name,sku,unit,stock_unit_code,cost,product_type,is_active")
       .eq("id", selectedProductId)
       .maybeSingle(),
+    supabase
+      .from("products")
+      .select("id,name,sku,unit,stock_unit_code,cost,product_type,is_active")
+      .in("product_type", ["preparacion", "venta"])
+      .eq("is_active", true)
+      .order("name", { ascending: true })
+      .limit(1200),
     supabase
       .from("products")
       .select("id,name,sku,unit,stock_unit_code,cost,product_type,is_active")
@@ -1574,6 +1582,7 @@ export default async function EditRecipePage({
   ]);
 
   const selectedProduct = (selectedProductData as ProductOption | null) ?? null;
+  const outputProductOptions = (outputProductRows ?? []) as ProductOption[];
   const ingredientOptions = (ingredientRows ?? []) as ProductOption[];
   const units = (unitsData ?? []) as UnitOption[];
   const recipeSiteUses = (recipeSiteUsesData ?? []) as RecipeSiteUseRow[];
@@ -2089,7 +2098,7 @@ export default async function EditRecipePage({
           primaryProductName={selectedProduct?.name ?? "Producto principal"}
           primaryUnit={defaultYieldUnit}
           yieldQty={Number(selectedRecipeCard.yield_qty ?? 1)}
-          products={ingredientOptions}
+          products={outputProductOptions}
           initialRows={initialOutputLines}
         />
 

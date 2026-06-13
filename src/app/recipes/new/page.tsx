@@ -1069,7 +1069,7 @@ export default async function NewRecipePage({
           primaryProductName={selectedProduct?.name ?? "Producto principal"}
           primaryUnit={defaultYieldUnit}
           yieldQty={1}
-          products={ingredientOptions}
+          products={products}
         />
 
         <section className="ui-panel space-y-4">

@@ -19,6 +19,7 @@ type ProductOption = {
   sku: string | null;
   unit: string | null;
   stock_unit_code?: string | null;
+  product_type?: string | null;
 };
 
 type Props = {
@@ -55,6 +56,10 @@ export function RecipeOutputsEditor({
   products,
   initialRows = [],
 }: Props) {
+  const eligibleProducts = products.filter((product) => {
+    const type = String(product.product_type ?? "").trim().toLowerCase();
+    return product.id !== primaryProductId && (!type || type === "preparacion" || type === "venta");
+  });
   const [rows, setRows] = useState<RecipeOutputLine[]>(initialRows);
   const visibleRows = rows.filter((row) => !row._delete);
   const primaryPct = Math.max(
@@ -127,14 +132,15 @@ export function RecipeOutputsEditor({
                     onChange={(event) => updateRow(index, { product_id: event.target.value })}
                   >
                     <option value="">Selecciona producto</option>
-                    {products
-                      .filter((product) => product.id !== primaryProductId)
-                      .map((product) => (
+                    {eligibleProducts.map((product) => (
                         <option key={product.id} value={product.id}>
                           {[product.name, product.sku ? `SKU ${product.sku}` : null].filter(Boolean).join(" · ")}
                         </option>
                       ))}
                   </select>
+                  <span className="block text-xs text-[var(--ui-muted)]">
+                    Solo preparaciones o preparaciones vendibles pueden salir como subproducto.
+                  </span>
                 </label>
                 <label className="space-y-1">
                   <span className="ui-label">Rol</span>

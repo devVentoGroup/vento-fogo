@@ -509,7 +509,8 @@ async function saveRecipe(formData: FormData) {
   const statusRaw = (asText(formData.get("status")) || "draft").toLowerCase();
   const status: "draft" | "published" | "archived" =
     statusRaw === "published" || statusRaw === "archived" ? statusRaw : "draft";
-  const recipeWillBeActive = asText(formData.get("is_active")) === "1";
+  const requestedRecipeActive = asText(formData.get("is_active")) === "1";
+  const recipeWillBeActive = status === "archived" ? false : requestedRecipeActive;
   const isArchivingOrDisabling = status === "archived" || !recipeWillBeActive;
 
   if (!productRow) {
@@ -522,7 +523,30 @@ async function saveRecipe(formData: FormData) {
     );
   }
 
-  if (!productRow.is_active && !isArchivingOrDisabling) {
+  if (isArchivingOrDisabling) {
+    const { error: archiveErr } = await supabase
+      .from("recipe_cards")
+      .update({
+        status,
+        is_active: recipeWillBeActive,
+      })
+      .eq("id", recipeCardId);
+
+    if (archiveErr) {
+      redirect(withQuery(returnBase, "error", archiveErr.message));
+    }
+
+    const qs = new URLSearchParams();
+    qs.set("saved", "1");
+    qs.set(status === "archived" ? "archived" : "disabled", "1");
+    if (source === "nexo") {
+      qs.set("product_id", productId);
+      qs.set("source", source);
+    }
+    redirect(`/recipes?${qs.toString()}`);
+  }
+
+  if (!productRow.is_active) {
     redirect(
       withQuery(
         returnBase,

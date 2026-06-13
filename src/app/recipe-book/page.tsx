@@ -748,7 +748,7 @@ export default async function RecipeBookPage({
             >
               {!coverImage ? (
                 <div className="flex h-full items-center justify-center text-4xl font-semibold text-[#F97316]">
-                  {selectedRecipe ? String(selectedProduct?.name ?? "R").trim().charAt(0).toUpperCase() || "R" : "âœ¦"}
+                  {selectedRecipe ? String(selectedProduct?.name ?? "R").trim().charAt(0).toUpperCase() || "R" : "F"}
                 </div>
               ) : null}
             </div>
@@ -944,7 +944,7 @@ export default async function RecipeBookPage({
 
       {recipes.length === 0 ? (
         <section className="rounded-[var(--ui-radius-card)] border border-[#FED7AA] bg-[#FFF7ED] p-6 text-center shadow-[var(--ui-shadow-soft)]">
-          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl bg-white text-3xl text-[#F97316]">âœ¦</div>
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl bg-white text-3xl text-[#F97316]">0</div>
           <h2 className="mt-4 text-2xl font-semibold text-[var(--ui-text)]">No hay recetas con estos filtros</h2>
           <p className="mx-auto mt-2 max-w-2xl text-sm leading-6 text-[var(--ui-muted)]">
             Prueba con otra sede, otra area, otro estado o limpia la busqueda.
@@ -965,7 +965,7 @@ export default async function RecipeBookPage({
                 {recipeGroups.map((group) => (
                   <div key={group.key}>
                     <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase text-[#C2410C]">
-                      <span>âœ¦</span>
+                      <span aria-hidden="true">-</span>
                       <span className="truncate">{group.title}</span>
                     </div>
                     <div className="grid gap-2">
@@ -1164,7 +1164,7 @@ export default async function RecipeBookPage({
                     <h3 className="mt-1 text-xl font-semibold text-[var(--ui-text)]">{group.title}</h3>
                     <p className="mt-1 text-sm text-[var(--ui-muted)]">{group.recipes.length} recetas</p>
                   </div>
-                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#FFF7ED] text-2xl text-[#F97316]">âœ¦</div>
+                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#FFF7ED] text-2xl text-[#F97316]">{group.recipes.length}</div>
                 </div>
                 <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
                   {group.recipes.map((recipe) => renderRecipeCard(recipe))}

@@ -156,7 +156,11 @@ function fmt(value: number | null | undefined, digits = 3) {
 }
 
 function locationLabel(location: LocationRow) {
-  return [location.code, location.zone, location.description].filter(Boolean).join(" - ") || location.id;
+  const description = String(location.description ?? "").trim();
+  const zone = String(location.zone ?? "").trim();
+  const code = String(location.code ?? "").trim();
+
+  return description || zone || code || location.id;
 }
 
 function outputModeLabel(mode: string | null | undefined) {

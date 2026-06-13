@@ -506,12 +506,28 @@ async function saveRecipe(formData: FormData) {
     .maybeSingle();
   const productRow = (product as ProductOption | null) ?? null;
 
-  if (!productRow || !productRow.is_active) {
+  const statusRaw = (asText(formData.get("status")) || "draft").toLowerCase();
+  const status: "draft" | "published" | "archived" =
+    statusRaw === "published" || statusRaw === "archived" ? statusRaw : "draft";
+  const recipeWillBeActive = asText(formData.get("is_active")) === "1";
+  const isArchivingOrDisabling = status === "archived" || !recipeWillBeActive;
+
+  if (!productRow) {
     redirect(
       withQuery(
         returnBase,
         "error",
-        "El producto seleccionado no esta activo.",
+        "El producto asociado a esta receta no existe.",
+      ),
+    );
+  }
+
+  if (!productRow.is_active && !isArchivingOrDisabling) {
+    redirect(
+      withQuery(
+        returnBase,
+        "error",
+        "El producto asociado a esta receta no esta activo. Solo puedes archivar o desactivar la receta.",
       ),
     );
   }
@@ -779,9 +795,6 @@ async function saveRecipe(formData: FormData) {
     .filter((step) => step.description.length > 0)
     .sort((a, b) => a.original_order - b.original_order);
 
-  const statusRaw = (asText(formData.get("status")) || "draft").toLowerCase();
-  const status: "draft" | "published" | "archived" =
-    statusRaw === "published" || statusRaw === "archived" ? statusRaw : "draft";
   const yieldQty = asPositive(formData.get("yield_qty"), 1);
   const yieldUnit =
     asText(formData.get("yield_unit")) || productRow.unit || "un";
@@ -973,7 +986,7 @@ async function saveRecipe(formData: FormData) {
     process_config:
       parseJsonObject(asText(formData.get("process_config"))) ?? {},
     status,
-    is_active: asText(formData.get("is_active")) === "1",
+    is_active: recipeWillBeActive,
   };
   if (siteId) recipePayload.site_id = siteId;
   recipePayload.area_id = areaId || null;
@@ -1770,7 +1783,7 @@ export default async function EditRecipePage({
 
   const inactiveProductWarning =
     selectedProduct && !selectedProduct.is_active
-      ? "El producto asociado a esta receta no esta activo. Puedes revisar la ficha, pero para guardar debe estar activo."
+      ? "El producto asociado a esta receta no esta activo. Puedes archivarla o desactivarla, pero no dejarla publicada y activa."
       : "";
 
   return (

@@ -10,6 +10,10 @@ import {
   RecipeStepsEditor,
   type RecipeStepLine,
 } from "@/features/recipes/recipe-steps-editor";
+import {
+  RecipeOutputsEditor,
+  type RecipeOutputLine,
+} from "@/features/recipes/recipe-outputs-editor";
 
 export const dynamic = "force-dynamic";
 
@@ -146,6 +150,16 @@ function asNullableNumber(value: FormDataEntryValue | null): number | null {
 function asPositive(value: FormDataEntryValue | null, fallback: number) {
   const parsed = asNullableNumber(value);
   return parsed != null && parsed > 0 ? parsed : fallback;
+}
+
+function parseRecipeOutputs(raw: string): RecipeOutputLine[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as RecipeOutputLine[]) : [];
+  } catch {
+    return [];
+  }
 }
 
 function normalizeUnitCode(value: string | null | undefined) {
@@ -773,6 +787,30 @@ async function saveRecipe(formData: FormData) {
     asText(formData.get("yield_unit")) || productRow.unit || "un";
   const portionSize = asNullableNumber(formData.get("portion_size"));
   const portionUnit = asText(formData.get("portion_unit")) || null;
+  const recipeOutputs = parseRecipeOutputs(asText(formData.get("recipe_outputs")))
+    .filter((output) => !output._delete)
+    .map((output) => ({
+      product_id: String(output.product_id ?? "").trim(),
+      output_role: output.output_role === "by_product" ? "by_product" : "co_product",
+      expected_qty: Number(output.expected_qty ?? 0),
+      expected_unit: String(output.expected_unit ?? "").trim() || yieldUnit,
+      cost_allocation_pct: Number(output.cost_allocation_pct ?? 0),
+      sort_order: Number(output.sort_order ?? 100),
+    }))
+    .filter(
+      (output) =>
+        output.product_id &&
+        output.product_id !== productId &&
+        Number.isFinite(output.expected_qty) &&
+        output.expected_qty > 0 &&
+        Number.isFinite(output.cost_allocation_pct) &&
+        output.cost_allocation_pct >= 0,
+    );
+  const secondaryCostPct = recipeOutputs.reduce((total, output) => total + output.cost_allocation_pct, 0);
+
+  if (secondaryCostPct > 100.000001) {
+    redirect(withQuery(returnBase, "error", "El porcentaje de costo de outputs no puede superar 100%."));
+  }
 
   if (status === "published") {
     if (recipeSiteUses.length <= 0) {
@@ -946,6 +984,46 @@ async function saveRecipe(formData: FormData) {
     .eq("id", recipeCardId);
   if (updateErr) {
     redirect(withQuery(returnBase, "error", updateErr.message));
+  }
+
+  const { error: deleteOutputsErr } = await supabase
+    .from("recipe_outputs")
+    .delete()
+    .eq("recipe_card_id", recipeCardId);
+  if (deleteOutputsErr) {
+    redirect(withQuery(returnBase, "error", deleteOutputsErr.message));
+  }
+
+  const outputRows = [
+    {
+      recipe_card_id: recipeCardId,
+      product_id: productId,
+      output_role: "primary",
+      expected_qty: yieldQty,
+      expected_unit: yieldUnit,
+      cost_allocation_method: "percentage",
+      cost_allocation_pct: Number((100 - secondaryCostPct).toFixed(6)),
+      sort_order: 1,
+      is_active: true,
+    },
+    ...recipeOutputs.map((output, index) => ({
+      recipe_card_id: recipeCardId,
+      product_id: output.product_id,
+      output_role: output.output_role,
+      expected_qty: output.expected_qty,
+      expected_unit: output.expected_unit,
+      cost_allocation_method: "percentage",
+      cost_allocation_pct: output.cost_allocation_pct,
+      sort_order: output.sort_order || index + 2,
+      is_active: true,
+    })),
+  ];
+
+  const { error: insertOutputsErr } = await supabase
+    .from("recipe_outputs")
+    .insert(outputRows);
+  if (insertOutputsErr) {
+    redirect(withQuery(returnBase, "error", insertOutputsErr.message));
   }
 
   const { error: deleteUsesErr } = await supabase
@@ -1385,6 +1463,7 @@ export default async function EditRecipePage({
     { data: unitsData },
     { data: existingIngredientRows },
     { data: existingStepsRows },
+    { data: recipeOutputsData },
     { data: recipeSiteUsesData },
     { data: productSiteSettingsData },
     { data: allAreasData },
@@ -1418,6 +1497,13 @@ export default async function EditRecipePage({
       .select("id,step_number,description,tip,time_minutes,image_path")
       .eq("recipe_card_id", recipeCardId)
       .order("step_number", { ascending: true }),
+    supabase
+      .from("recipe_outputs")
+      .select("id,product_id,output_role,expected_qty,expected_unit,cost_allocation_pct,sort_order,is_active")
+      .eq("recipe_card_id", recipeCardId)
+      .eq("is_active", true)
+      .neq("output_role", "primary")
+      .order("sort_order", { ascending: true }),
     supabase
       .from("recipe_site_uses")
       .select(
@@ -1547,6 +1633,26 @@ export default async function EditRecipePage({
     tip: row.tip ?? "",
     time_minutes: row.time_minutes ?? undefined,
     step_image_url: row.image_path ?? "",
+  }));
+
+  const initialOutputLines: RecipeOutputLine[] = (
+    (recipeOutputsData ?? []) as Array<{
+      id: string;
+      product_id: string;
+      output_role: "co_product" | "by_product" | "primary";
+      expected_qty: number;
+      expected_unit: string;
+      cost_allocation_pct: number | null;
+      sort_order: number | null;
+    }>
+  ).map((row) => ({
+    id: row.id,
+    product_id: row.product_id,
+    output_role: row.output_role === "by_product" ? "by_product" : "co_product",
+    expected_qty: Number(row.expected_qty),
+    expected_unit: row.expected_unit,
+    cost_allocation_pct: Number(row.cost_allocation_pct ?? 0),
+    sort_order: row.sort_order ?? 100,
   }));
 
   const defaultYieldUnit =
@@ -1938,6 +2044,16 @@ export default async function EditRecipePage({
               ? `${NEXO_BASE_URL}/inventory/catalog/${encodeURIComponent(selectedProductId)}`
               : `${NEXO_BASE_URL}/inventory/catalog`
           }
+        />
+
+        <RecipeOutputsEditor
+          key={`outputs-${selectedProductId}-${recipeCardId}`}
+          primaryProductId={selectedProductId}
+          primaryProductName={selectedProduct?.name ?? "Producto principal"}
+          primaryUnit={defaultYieldUnit}
+          yieldQty={Number(selectedRecipeCard.yield_qty ?? 1)}
+          products={ingredientOptions}
+          initialRows={initialOutputLines}
         />
 
         <section className="ui-panel space-y-4">

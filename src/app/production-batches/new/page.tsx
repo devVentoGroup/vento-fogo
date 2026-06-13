@@ -8,6 +8,7 @@ import {
   type ProductionIngredientDraft,
   type ProductionLocationOption,
   type ProductionOutputMode,
+  type ProductionOutputDraft,
 } from "./production-batch-real-form";
 
 export const dynamic = "force-dynamic";
@@ -107,6 +108,27 @@ type PackagePayloadRow = {
   unit_code?: unknown;
   uom_profile_id?: unknown;
   notes?: unknown;
+};
+
+type OutputPayloadRow = {
+  recipe_output_id?: unknown;
+  product_id?: unknown;
+  output_role?: unknown;
+  produced_qty?: unknown;
+  produced_unit?: unknown;
+  destination_location_id?: unknown;
+  cost_allocation_pct?: unknown;
+};
+
+type RecipeOutputRow = {
+  id: string;
+  product_id: string;
+  output_role: "primary" | "co_product" | "by_product";
+  expected_qty: number | null;
+  expected_unit: string | null;
+  cost_allocation_pct: number | null;
+  destination_location_id: string | null;
+  products?: Relation<ProductShape>;
 };
 
 function one<T>(value: Relation<T>): T | null {
@@ -250,6 +272,7 @@ async function createBatch(formData: FormData) {
 
   const rawIngredients = parseJsonArray<IngredientPayloadRow>(text(formData.get("ingredients_payload")));
   const rawPackages = parseJsonArray<PackagePayloadRow>(text(formData.get("packages_payload")));
+  const rawOutputs = parseJsonArray<OutputPayloadRow>(text(formData.get("outputs_payload")));
 
   const ingredients = rawIngredients
     .map((row) => ({
@@ -271,6 +294,23 @@ async function createBatch(formData: FormData) {
       notes: text(typeof row.notes === "string" ? row.notes : null) || null,
     }))
     .filter((row) => row.actual_qty > 0 && row.unit_code);
+
+  const outputs = rawOutputs
+    .map((row) => ({
+      recipe_output_id: cleanNullableUuid(row.recipe_output_id),
+      product_id: cleanNullableUuid(row.product_id),
+      output_role:
+        row.output_role === "by_product"
+          ? "by_product"
+          : row.output_role === "primary"
+            ? "primary"
+            : "co_product",
+      produced_qty: roundQty(numeric(row.produced_qty)),
+      produced_unit: text(typeof row.produced_unit === "string" ? row.produced_unit : null),
+      destination_location_id: cleanNullableUuid(row.destination_location_id),
+      cost_allocation_pct: roundQty(numeric(row.cost_allocation_pct), 6),
+    }))
+    .filter((row) => row.product_id && row.produced_qty > 0 && row.produced_unit);
 
   if (!ingredients.length) {
     redirect(buildReturn(recipeId, qty, destinationLocationId, "La receta no tiene ingredientes reales para consumir."));
@@ -296,6 +336,7 @@ async function createBatch(formData: FormData) {
     p_destination_location_id: isOrderFulfillment ? null : destinationLocationId,
     p_ingredients: ingredients,
     p_packages: isOrderFulfillment ? [] : packages,
+    p_outputs: outputs,
     p_notes: notes || null,
   });
 
@@ -397,6 +438,7 @@ export default async function NewProductionBatchPage({
 
   const [
     { data: ingredientRowsData, error: ingredientRowsError },
+    { data: recipeOutputsData },
     { data: locationsData },
     { data: productSiteSettingData },
     { data: productionRoutesData },
@@ -407,6 +449,12 @@ export default async function NewProductionBatchPage({
       .eq("product_id", recipe.product_id)
       .eq("is_active", true)
       .order("created_at", { ascending: true }),
+    supabase
+      .from("recipe_outputs")
+      .select("id,product_id,output_role,expected_qty,expected_unit,cost_allocation_pct,destination_location_id,products(id,name,sku,unit,stock_unit_code)")
+      .eq("recipe_card_id", recipe.id)
+      .eq("is_active", true)
+      .order("sort_order", { ascending: true }),
     supabase
       .from("inventory_locations")
       .select("id,code,zone,description,location_type")
@@ -446,6 +494,7 @@ export default async function NewProductionBatchPage({
   }
 
   const ingredients = (ingredientRowsData ?? []) as IngredientRow[];
+  const recipeOutputs = (recipeOutputsData ?? []) as RecipeOutputRow[];
   const locations = (locationsData ?? []) as LocationRow[];
   const productSiteSetting = productSiteSettingData as ProductSiteSettingRow | null;
   const productionRoutes = (productionRoutesData ?? []) as ProductionRouteRow[];
@@ -468,6 +517,35 @@ export default async function NewProductionBatchPage({
   const configuredProductionLocation = configuredProductionLocationId
     ? locations.find((location) => location.id === configuredProductionLocationId) ?? null
     : null;
+
+  const outputDrafts: ProductionOutputDraft[] = (
+    recipeOutputs.length > 0
+      ? recipeOutputs
+      : [
+          {
+            id: "",
+            product_id: recipe.product_id,
+            output_role: "primary" as const,
+            expected_qty: recipe.yield_qty,
+            expected_unit: recipe.yield_unit,
+            cost_allocation_pct: 100,
+            destination_location_id: null,
+            products: recipe.products,
+          },
+        ]
+  ).map((output) => {
+    const product = one(output.products);
+    return {
+      recipeOutputId: output.id || null,
+      productId: output.product_id,
+      productName: product?.name ?? "Producto resultante",
+      outputRole: output.output_role,
+      expectedQty: Number(output.expected_qty ?? recipe.yield_qty),
+      expectedUnit: output.expected_unit || recipe.yield_unit || product?.stock_unit_code || product?.unit || "un",
+      costAllocationPct: Number(output.cost_allocation_pct ?? 0),
+      destinationLocationId: output.destination_location_id || null,
+    };
+  });
   const configuredOutputLocationId =
     !isOrderFulfillmentRoute && productionRoute?.output_location_id
       ? String(productionRoute.output_location_id).trim()
@@ -634,6 +712,7 @@ export default async function NewProductionBatchPage({
         portionUnit={portionUnit}
         initialProducedQty={producedQty}
         ingredients={ingredientDrafts}
+        outputs={outputDrafts}
         notesPlaceholder="Notas de producción, ajustes, textura, cocción, empaque o incidencias."
       />
     </div>

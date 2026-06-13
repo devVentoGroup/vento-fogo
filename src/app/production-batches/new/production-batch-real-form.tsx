@@ -20,6 +20,17 @@ export type ProductionLocationOption = {
 
 export type ProductionOutputMode = "inventory_stock" | "sellable_stock" | "order_fulfillment";
 
+export type ProductionOutputDraft = {
+  recipeOutputId: string | null;
+  productId: string;
+  productName: string;
+  outputRole: "primary" | "co_product" | "by_product";
+  expectedQty: number;
+  expectedUnit: string;
+  costAllocationPct: number;
+  destinationLocationId: string | null;
+};
+
 type IngredientState = ProductionIngredientDraft & {
   requiredQty: number;
   actualQty: number;
@@ -33,6 +44,11 @@ type PackageState = {
   actualQty: number;
   unitCode: string;
   notes: string;
+};
+
+type OutputState = ProductionOutputDraft & {
+  producedQty: number;
+  destinationLocationId: string | null;
 };
 
 type ProductionBatchRealFormProps = {
@@ -53,6 +69,7 @@ type ProductionBatchRealFormProps = {
   portionUnit: string;
   initialProducedQty: number;
   ingredients: ProductionIngredientDraft[];
+  outputs: ProductionOutputDraft[];
   notesPlaceholder?: string;
 };
 
@@ -314,6 +331,7 @@ export function ProductionBatchRealForm({
   portionUnit,
   initialProducedQty,
   ingredients,
+  outputs,
   notesPlaceholder = "Opcional",
 }: ProductionBatchRealFormProps) {
   const [producedQtyInput, setProducedQtyInput] = useState(String(initialProducedQty));
@@ -340,6 +358,14 @@ export function ProductionBatchRealForm({
         actualQty: requiredQty,
       };
     })
+  );
+
+  const [outputRows, setOutputRows] = useState<OutputState[]>(() =>
+    outputs.map((output) => ({
+      ...output,
+      producedQty: scaleIngredient(output.expectedQty, initialProducedQty, expectedYieldQty),
+      destinationLocationId: output.destinationLocationId || destinationLocationId || null,
+    }))
   );
 
   const [packages, setPackages] = useState<PackageState[]>(() =>
@@ -374,6 +400,20 @@ export function ProductionBatchRealForm({
           notes: entry.notes.trim() || null,
         })),
     [packages]
+  );
+
+  const outputPayload = useMemo(
+    () =>
+      outputRows.map((output) => ({
+        recipe_output_id: output.recipeOutputId,
+        product_id: output.productId,
+        output_role: output.outputRole,
+        produced_qty: roundQty(output.producedQty),
+        produced_unit: output.expectedUnit,
+        destination_location_id: output.destinationLocationId,
+        cost_allocation_pct: roundQty(output.costAllocationPct, 6),
+      })),
+    [outputRows]
   );
 
   const totalPackaged = roundQty(packagePayload.reduce((acc, entry) => acc + Number(entry.actual_qty ?? 0), 0));
@@ -412,6 +452,12 @@ export function ProductionBatchRealForm({
     if (safeProducedQty <= 0) return;
     regenerateIngredients(safeProducedQty);
     regeneratePackages(safeProducedQty);
+    setOutputRows((prev) =>
+      prev.map((output) => ({
+        ...output,
+        producedQty: scaleIngredient(output.expectedQty, safeProducedQty, expectedYieldQty),
+      }))
+    );
   };
 
   const updateIngredient = (ingredientProductId: string, actualQty: number) => {
@@ -420,6 +466,20 @@ export function ProductionBatchRealForm({
         ingredient.ingredientProductId === ingredientProductId
           ? { ...ingredient, actualQty: roundQty(Math.max(0, actualQty)) }
           : ingredient
+      )
+    );
+  };
+
+  const updateOutput = (productId: string, patch: Partial<OutputState>) => {
+    setOutputRows((prev) =>
+      prev.map((output) =>
+        output.productId === productId
+          ? {
+              ...output,
+              ...patch,
+              producedQty: patch.producedQty === undefined ? output.producedQty : roundQty(Math.max(0, Number(patch.producedQty))),
+            }
+          : output
       )
     );
   };
@@ -469,6 +529,7 @@ export function ProductionBatchRealForm({
       <input type="hidden" name="recipe_id" value={recipeId} />
       <input type="hidden" name="ingredients_payload" value={JSON.stringify(ingredientPayload)} />
       <input type="hidden" name="packages_payload" value={JSON.stringify(effectivePackagePayload)} />
+      <input type="hidden" name="outputs_payload" value={JSON.stringify(outputPayload)} />
 
       <section className="min-w-0 space-y-6">
         <div className="ui-panel">
@@ -608,9 +669,64 @@ export function ProductionBatchRealForm({
           ) : null}
         </div>
 
+        <div className="ui-panel">
+          <h2 className="ui-h2">3. Outputs reales del lote</h2>
+          <p className="mt-1 ui-body-muted">
+            Registra cuánto salió de cada producto resultante. El costo real se reparte según el porcentaje definido en la receta.
+          </p>
+          <div className="mt-4 space-y-3">
+            {outputRows.map((output) => (
+              <div key={output.productId} className="grid gap-3 rounded-xl border border-[var(--ui-border)] bg-white p-4 md:grid-cols-[minmax(220px,1fr)_140px_180px_110px] md:items-end">
+                <div>
+                  <div className="text-sm font-semibold text-[var(--ui-text)]">{output.productName}</div>
+                  <div className="mt-1 text-xs text-[var(--ui-muted)]">
+                    {output.outputRole === "primary" ? "Principal" : output.outputRole === "by_product" ? "Subproducto" : "Coproducto"} · esperado {fmt(output.expectedQty)} {output.expectedUnit}
+                  </div>
+                </div>
+                <label className="block">
+                  <span className="ui-label">Real ({output.expectedUnit})</span>
+                  <input
+                    type="number"
+                    min="0.001"
+                    step="0.001"
+                    value={output.producedQty}
+                    onChange={(event) => updateOutput(output.productId, { producedQty: Number(event.target.value) })}
+                    className="ui-input h-10"
+                  />
+                </label>
+                <label className="block">
+                  <span className="ui-label">LOC destino</span>
+                  {isOrderFulfillment ? (
+                    <div className="mt-1 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-950">
+                      Sin stock
+                    </div>
+                  ) : (
+                    <select
+                      className="ui-input h-10"
+                      value={output.destinationLocationId || ""}
+                      onChange={(event) => updateOutput(output.productId, { destinationLocationId: event.target.value || null })}
+                      required
+                    >
+                      <option value="">Selecciona LOC</option>
+                      {locations.map((location) => (
+                        <option key={location.id} value={location.id}>
+                          {location.label}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </label>
+                <div className="rounded-lg border border-[var(--ui-border)] bg-[var(--ui-bg-soft)] px-3 py-2 text-sm font-semibold text-[var(--ui-text)]">
+                  {fmt(output.costAllocationPct, 2)}%
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
         {isOrderFulfillment ? (
           <div className="ui-panel">
-            <h2 className="ui-h2">3. Salida a pedido/POS</h2>
+            <h2 className="ui-h2">4. Salida a pedido/POS</h2>
             <p className="mt-1 ui-body-muted">
               Esta ruta no crea stock terminado ni empaques físicos del lote. FOGO consumirá los ingredientes reales y dejará la producción lista para conectarse al pedido/POS.
             </p>
@@ -633,7 +749,7 @@ export function ProductionBatchRealForm({
         <div className="ui-panel">
           <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
             <div>
-              <h2 className="ui-h2">3. Empaque real del lote</h2>
+              <h2 className="ui-h2">4. Empaque real del lote</h2>
               <p className="mt-1 ui-body-muted">
                 Cada bolsa o recipiente queda como empaque físico real del lote. No se crean presentaciones manuales
                 para preparaciones; la suma debe coincidir con el rendimiento real.

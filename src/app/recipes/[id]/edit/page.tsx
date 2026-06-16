@@ -1846,23 +1846,27 @@ export default async function EditRecipePage({
     const existingUse = recipeSiteUseBySiteId.get(site.id) ?? null;
     const setting = productSiteSettingBySiteId.get(site.id) ?? null;
     const isCurrentRecipeSite = selectedRecipeCard.site_id === site.id;
+    const productSiteEnabled = Boolean(
+      setting?.is_active ||
+      setting?.local_production_enabled ||
+      setting?.sales_enabled ||
+      setting?.inventory_enabled,
+    );
     const usageMode =
-      existingUse?.usage_mode ??
-      (isCurrentRecipeSite
-        ? "produces_here"
-        : setting?.local_production_enabled
+      productSiteEnabled
+        ? setting?.local_production_enabled
           ? "produces_here"
           : setting?.sales_enabled
             ? "sells_finished_good"
             : setting?.inventory_enabled
               ? "stored_for_production"
-              : "stored_for_production");
+              : existingUse?.usage_mode ?? "stored_for_production"
+        : isCurrentRecipeSite
+        ? "produces_here"
+        : "stored_for_production";
     const enabled = Boolean(
-      existingUse?.is_active ||
       isCurrentRecipeSite ||
-      setting?.local_production_enabled ||
-      setting?.sales_enabled ||
-      setting?.inventory_enabled,
+      productSiteEnabled,
     );
     const siteAreas = areasBySiteId.get(site.id) ?? [];
     const siteLocations = locationsBySiteId.get(site.id) ?? [];

@@ -121,6 +121,16 @@ type ProductSiteSettingRow = {
   production_location_id: string | null;
 };
 
+type ProductSiteProductionRouteRow = {
+  id: string;
+  site_id: string;
+  external_recipe_id: string | null;
+  input_location_id: string | null;
+  output_mode: string | null;
+  output_location_id: string | null;
+  is_default: boolean | null;
+};
+
 type RecipeSiteUseMode =
   | "produces_here"
   | "sells_finished_good"
@@ -569,6 +579,74 @@ async function saveRecipe(formData: FormData) {
     );
   }
 
+  const routeSiteIds = Array.from(
+    new Set(recipeSiteUses.map((use) => use.siteId).filter(Boolean)),
+  );
+  let productionRouteRows: ProductSiteProductionRouteRow[] = [];
+
+  if (routeSiteIds.length > 0) {
+    const { data: routesData, error: routesErr } = await supabase
+      .from("product_site_production_routes")
+      .select(
+        "id,site_id,external_recipe_id,input_location_id,output_mode,output_location_id,is_default",
+      )
+      .eq("product_id", productId)
+      .eq("is_active", true)
+      .in("site_id", routeSiteIds);
+
+    if (routesErr) {
+      redirect(withQuery(returnBase, "error", routesErr.message));
+    }
+
+    productionRouteRows =
+      (routesData ?? []) as ProductSiteProductionRouteRow[];
+  }
+
+  const productionRoutesBySiteId = new Map<
+    string,
+    ProductSiteProductionRouteRow
+  >();
+  for (const siteRoute of routeSiteIds) {
+    const siteRoutes = productionRouteRows.filter(
+      (route) => String(route.site_id ?? "").trim() === siteRoute,
+    );
+    const selectedRoute =
+      siteRoutes.find(
+        (route) =>
+          String(route.external_recipe_id ?? "").trim() === recipeCardId,
+      ) ??
+      siteRoutes.find((route) => Boolean(route.is_default)) ??
+      siteRoutes[0] ??
+      null;
+    if (selectedRoute) {
+      productionRoutesBySiteId.set(siteRoute, selectedRoute);
+    }
+  }
+
+  recipeSiteUses = recipeSiteUses.map((use) => {
+    if (
+      use.usageMode !== "produces_here" &&
+      use.usageMode !== "prepares_to_order"
+    ) {
+      return use;
+    }
+
+    const route = productionRoutesBySiteId.get(use.siteId) ?? null;
+    if (!route) return use;
+
+    const outputMode = String(route.output_mode ?? "inventory_stock").trim();
+
+    return {
+      ...use,
+      sourceLocationId: use.sourceLocationId || route.input_location_id || null,
+      destinationLocationId:
+        use.destinationLocationId ||
+        (outputMode === "order_fulfillment"
+          ? null
+          : route.output_location_id || null),
+    };
+  });
+
   const recipeUseLocationIds = Array.from(
     new Set(
       recipeSiteUses
@@ -916,7 +994,7 @@ async function saveRecipe(formData: FormData) {
         withQuery(
           returnBase,
           "error",
-          "Las sedes que producen o preparan al momento necesitan area y LOC de ingredientes.",
+          "Configura en NEXO el area y LOC de insumos para las sedes que producen o preparan al momento.",
         ),
       );
     }
@@ -925,7 +1003,7 @@ async function saveRecipe(formData: FormData) {
         withQuery(
           returnBase,
           "error",
-          "Las sedes que producen aqui necesitan LOC destino para el producto terminado.",
+          "Configura en NEXO el LOC donde queda el terminado para las sedes que producen aqui.",
         ),
       );
     }

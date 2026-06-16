@@ -1801,6 +1801,7 @@ export default async function EditRecipePage({
       site,
       enabled,
       usageMode,
+      isProductionCenter: String(site.site_type ?? "").trim() === "production_center",
       areas: siteAreas,
       locations: siteLocations,
       selectedAreaId,
@@ -1808,6 +1809,7 @@ export default async function EditRecipePage({
       selectedDestinationLocationId,
     };
   });
+  const visibleRecipeUseRows = recipeUseRows.filter((row) => !row.isProductionCenter);
 
   const productSelectionWarning =
     requestedProductId && requestedProductId !== selectedProductId
@@ -1910,20 +1912,55 @@ export default async function EditRecipePage({
         <section className="ui-panel space-y-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h2 className="ui-h2">Usos por sede</h2>
+              <h2 className="ui-h2">Disponibilidad por sede</h2>
               <p className="mt-1 max-w-3xl text-sm text-[var(--ui-muted)]">
-                Define donde se produce, se almacena, se consume o se vende esta
-                misma receta.
+                Marca los satelites donde aplica esta receta. El centro produce
+                para remision y la ruta de LOCs se toma de NEXO.
               </p>
             </div>
             <span className="ui-chip">
-              {recipeUseRows.filter((row) => row.enabled).length} activa(s)
+              {visibleRecipeUseRows.filter((row) => row.enabled).length} activa(s)
             </span>
           </div>
 
+          {recipeUseRows
+            .filter((row) => row.isProductionCenter)
+            .map((row) => (
+              <div key={`hidden-${row.site.id}`} hidden>
+                <input name="site_use_site_id" value={row.site.id} readOnly />
+                {row.enabled ? (
+                  <input
+                    name={`site_use_enabled_${row.site.id}`}
+                    value="1"
+                    readOnly
+                  />
+                ) : null}
+                <input
+                  name={`site_use_mode_${row.site.id}`}
+                  value={row.usageMode}
+                  readOnly
+                />
+                <input
+                  name={`site_use_area_${row.site.id}`}
+                  value={row.selectedAreaId}
+                  readOnly
+                />
+                <input
+                  name={`site_use_source_loc_${row.site.id}`}
+                  value={row.selectedSourceLocationId}
+                  readOnly
+                />
+                <input
+                  name={`site_use_destination_loc_${row.site.id}`}
+                  value={row.selectedDestinationLocationId}
+                  readOnly
+                />
+              </div>
+            ))}
+
           <div className="grid gap-4 lg:grid-cols-2">
-            {recipeUseRows.length ? (
-              recipeUseRows.map((row) => {
+            {visibleRecipeUseRows.length ? (
+              visibleRecipeUseRows.map((row) => {
                 const sourceLocationOptions = locationOptionsForArea(
                   row.locations,
                   row.selectedAreaId,
@@ -2000,7 +2037,11 @@ export default async function EditRecipePage({
                       </span>
                     </label>
 
-                    <div className="grid gap-3 md:grid-cols-3">
+                    <details className="rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3">
+                      <summary className="cursor-pointer text-sm font-semibold text-[var(--ui-text)]">
+                        Ajuste avanzado de LOCs
+                      </summary>
+                      <div className="mt-3 grid gap-3 md:grid-cols-3">
                       <label className="block min-w-0 space-y-1">
                         <span className="ui-label">Área</span>
                         <select
@@ -2060,7 +2101,8 @@ export default async function EditRecipePage({
                           Solo requerido cuando esta sede produce el item.
                         </span>
                       </label>
-                    </div>
+                      </div>
+                    </details>
                   </div>
                 </div>
                 );

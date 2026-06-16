@@ -922,7 +922,9 @@ export default async function NewRecipePage({
   const defaultYieldUnit = selectedProduct?.unit || "un";
   const formSiteId = requestedSiteId || resolvedSiteId;
   const productSelectionWarning = requestedProductId
-    ? requestedProductHasRecipe
+    ? requestedProductIsAvailable
+      ? ""
+      : requestedProductHasRecipe
       ? "Este producto ya tiene una receta asociada. Para cambiarla, entra desde la receta existente y usa edición."
       : requestedProduct
         ? "No fue posible seleccionar este producto para nueva receta. Revisa que este activo y sea de tipo preparacion o venta."

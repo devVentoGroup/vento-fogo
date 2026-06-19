@@ -1028,11 +1028,20 @@ async function saveRecipe(formData: FormData) {
   }
 
   if (areaId) {
-    const { data: validAreas } = siteId
+    const { data: rpcValidAreas } = siteId
       ? await supabase.rpc("fogo_recipe_area_options", { p_site_id: siteId })
       : { data: [] as AreaOption[] };
+    let validAreas = (rpcValidAreas ?? []) as AreaOption[];
+    if (siteId && validAreas.length === 0) {
+      const { data: fallbackAreasData } = await supabase
+        .from("areas")
+        .select("id,code,name,kind,site_id")
+        .eq("site_id", siteId)
+        .eq("is_active", true);
+      validAreas = (fallbackAreasData ?? []) as AreaOption[];
+    }
     const area =
-      ((validAreas ?? []) as AreaOption[]).find(
+      validAreas.find(
         (option) => option.id === areaId,
       ) ?? null;
     if (!area) {

@@ -41,6 +41,7 @@ type ProductOption = {
   cost: number | null;
   product_type: string | null;
   is_active: boolean | null;
+  product_inventory_profiles?: { inventory_kind: string | null } | { inventory_kind: string | null }[] | null;
 };
 
 type SiteOption = {
@@ -186,6 +187,23 @@ function normalizeSlug(value: string | null | undefined) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "");
+}
+
+function productInventoryKind(product: ProductOption) {
+  const profile = Array.isArray(product.product_inventory_profiles)
+    ? product.product_inventory_profiles[0]
+    : product.product_inventory_profiles;
+  return String(profile?.inventory_kind ?? "").trim().toLowerCase();
+}
+
+function isRecipeIngredientOption(product: ProductOption) {
+  const productType = String(product.product_type ?? "").trim().toLowerCase();
+  const inventoryKind = productInventoryKind(product);
+
+  if (inventoryKind === "asset") return false;
+  if (productType === "preparacion") return true;
+  if (productType !== "insumo") return false;
+  return !inventoryKind || ["ingredient", "packaging", "unclassified"].includes(inventoryKind);
 }
 
 function normalizeStoredImageValue(value: unknown) {
@@ -1608,7 +1626,7 @@ export default async function EditRecipePage({
       .limit(1200),
     supabase
       .from("products")
-      .select("id,name,sku,unit,stock_unit_code,cost,product_type,is_active")
+      .select("id,name,sku,unit,stock_unit_code,cost,product_type,is_active,product_inventory_profiles(inventory_kind)")
       .in("product_type", ["insumo", "preparacion"])
       .eq("is_active", true)
       .order("name", { ascending: true })
@@ -1670,7 +1688,7 @@ export default async function EditRecipePage({
 
   const selectedProduct = (selectedProductData as ProductOption | null) ?? null;
   const outputProductOptions = (outputProductRows ?? []) as ProductOption[];
-  const ingredientOptions = (ingredientRows ?? []) as ProductOption[];
+  const ingredientOptions = ((ingredientRows ?? []) as ProductOption[]).filter(isRecipeIngredientOption);
   const units = (unitsData ?? []) as UnitOption[];
   const recipeSiteUses = (recipeSiteUsesData ?? []) as RecipeSiteUseRow[];
   const productSiteSettings = (productSiteSettingsData ??

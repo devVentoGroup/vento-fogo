@@ -80,6 +80,52 @@ type RecipeDependencyRow = {
   ingredient_product_id: string | null;
 };
 
+type InventoryLocationOption = {
+  id: string;
+  site_id: string;
+  area_id: string | null;
+  code: string | null;
+  zone: string | null;
+  description: string | null;
+  location_type: string | null;
+  is_active: boolean | null;
+};
+
+type ProductSiteSettingRow = {
+  site_id: string;
+  product_id: string;
+  is_active: boolean;
+  local_production_enabled: boolean | null;
+  sales_enabled: boolean | null;
+  inventory_enabled?: boolean | null;
+  production_location_id: string | null;
+};
+
+type ProductSiteProductionRouteRow = {
+  id: string;
+  site_id: string;
+  external_recipe_id: string | null;
+  input_location_id: string | null;
+  output_mode: string | null;
+  output_location_id: string | null;
+  is_default: boolean | null;
+};
+
+type RecipeSiteUseMode =
+  | "produces_here"
+  | "sells_finished_good"
+  | "prepares_to_order"
+  | "stored_for_production"
+  | "no_inventory";
+
+type RecipeSiteUseInput = {
+  siteId: string;
+  usageMode: RecipeSiteUseMode;
+  areaId: string | null;
+  sourceLocationId: string | null;
+  destinationLocationId: string | null;
+};
+
 function asText(value: FormDataEntryValue | null) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -248,14 +294,106 @@ function recipeEditPath(
   return query ? `${base}?${query}` : base;
 }
 
+function parseRecipeSiteUses(formData: FormData): RecipeSiteUseInput[] {
+  const siteIds = Array.from(
+    new Set(
+      formData
+        .getAll("site_use_site_id")
+        .map((value) => asText(value))
+        .filter(Boolean),
+    ),
+  );
+  const validModes = new Set<string>([
+    "produces_here",
+    "sells_finished_good",
+    "prepares_to_order",
+    "stored_for_production",
+    "no_inventory",
+  ]);
+
+  return siteIds.flatMap((siteId) => {
+    if (asText(formData.get(`site_use_enabled_${siteId}`)) !== "1") return [];
+
+    const rawMode = asText(formData.get(`site_use_mode_${siteId}`));
+    const usageMode = validModes.has(rawMode) ? rawMode : "sells_finished_good";
+    return [
+      {
+        siteId,
+        usageMode: usageMode as RecipeSiteUseInput["usageMode"],
+        areaId: asText(formData.get(`site_use_area_${siteId}`)) || null,
+        sourceLocationId:
+          asText(formData.get(`site_use_source_loc_${siteId}`)) || null,
+        destinationLocationId:
+          asText(formData.get(`site_use_destination_loc_${siteId}`)) || null,
+      },
+    ];
+  });
+}
+
+function selectPrimaryRecipeUse(uses: RecipeSiteUseInput[]) {
+  return (
+    uses.find(
+      (use) =>
+        use.usageMode === "produces_here" ||
+        use.usageMode === "prepares_to_order",
+    ) ??
+    uses[0] ??
+    null
+  );
+}
+
+function siteLabel(site: SiteOption | null | undefined) {
+  return site?.name ?? "Sede";
+}
+
+function areaLabel(area: AreaOption | null | undefined) {
+  return area?.name ?? area?.kind ?? "Area";
+}
+
+function locationLabel(location: InventoryLocationOption | null | undefined) {
+  if (!location) return "LOC";
+  const code = location.code ? `${location.code} - ` : "";
+  return `${code}${location.zone ?? location.description ?? location.id}`;
+}
+
+function usageLabel(mode: string) {
+  if (mode === "produces_here") return "Se produce aqui";
+  if (mode === "sells_finished_good") return "Se vende terminado";
+  if (mode === "prepares_to_order") return "Se prepara al momento";
+  if (mode === "stored_for_production") return "Se almacena y se consume";
+  return "No maneja inventario";
+}
+
+function usageHelp(mode: string) {
+  if (mode === "produces_here") {
+    return "Fabrica este producto: descuenta ingredientes desde LOC origen y recibe terminado en LOC destino.";
+  }
+  if (mode === "sells_finished_good") {
+    return "Sale como producto terminado para venta directa desde el LOC origen.";
+  }
+  if (mode === "prepares_to_order") {
+    return "Se prepara y se vende en el momento: consume ingredientes desde el LOC origen.";
+  }
+  if (mode === "stored_for_production") {
+    return "No se produce ni se vende aqui: se guarda y luego se consume como ingrediente de otras recetas.";
+  }
+  return "La sede no recibe ni descuenta este producto.";
+}
+
 async function saveRecipe(formData: FormData) {
   "use server";
 
-  const siteId = asText(formData.get("site_id"));
-  const areaId = asText(formData.get("area_id"));
+  let siteId = asText(formData.get("site_id"));
+  let areaId = asText(formData.get("area_id"));
   const source = asText(formData.get("source"));
   const productId = asText(formData.get("product_id"));
-  const returnBase = baseNewPath(siteId, areaId, productId, source);
+  let recipeSiteUses = parseRecipeSiteUses(formData);
+  let primaryUse = selectPrimaryRecipeUse(recipeSiteUses);
+  if (primaryUse) {
+    siteId = primaryUse.siteId;
+    areaId = primaryUse.areaId ?? "";
+  }
+  let returnBase = baseNewPath(siteId, areaId, productId, source);
 
   const { supabase } = await requireAppAccess({
     appId: APP_ID,
@@ -301,6 +439,225 @@ async function saveRecipe(formData: FormData) {
         "Solo se permiten productos tipo preparacion o venta.",
       ),
     );
+  }
+
+  const routeSiteIds = Array.from(
+    new Set(recipeSiteUses.map((use) => use.siteId).filter(Boolean)),
+  );
+  let productionRouteRows: ProductSiteProductionRouteRow[] = [];
+
+  if (routeSiteIds.length > 0) {
+    const { data: routesData, error: routesErr } = await supabase
+      .from("product_site_production_routes")
+      .select(
+        "id,site_id,external_recipe_id,input_location_id,output_mode,output_location_id,is_default",
+      )
+      .eq("product_id", productId)
+      .eq("is_active", true)
+      .in("site_id", routeSiteIds);
+
+    if (routesErr) {
+      redirect(withQuery(returnBase, "error", routesErr.message));
+    }
+
+    productionRouteRows =
+      (routesData ?? []) as ProductSiteProductionRouteRow[];
+  }
+
+  const productionRoutesBySiteId = new Map<
+    string,
+    ProductSiteProductionRouteRow
+  >();
+  for (const siteRoute of routeSiteIds) {
+    const siteRoutes = productionRouteRows.filter(
+      (route) => String(route.site_id ?? "").trim() === siteRoute,
+    );
+    const selectedRoute =
+      siteRoutes.find((route) => Boolean(route.is_default)) ??
+      siteRoutes[0] ??
+      null;
+    if (selectedRoute) {
+      productionRoutesBySiteId.set(siteRoute, selectedRoute);
+    }
+  }
+
+  recipeSiteUses = recipeSiteUses.map((use) => {
+    if (
+      use.usageMode !== "produces_here" &&
+      use.usageMode !== "prepares_to_order"
+    ) {
+      return use;
+    }
+
+    const route = productionRoutesBySiteId.get(use.siteId) ?? null;
+    if (!route) return use;
+
+    const outputMode = String(route.output_mode ?? "inventory_stock").trim();
+
+    return {
+      ...use,
+      sourceLocationId: use.sourceLocationId || route.input_location_id || null,
+      destinationLocationId:
+        use.destinationLocationId ||
+        (outputMode === "order_fulfillment"
+          ? null
+          : route.output_location_id || null),
+    };
+  });
+
+  const recipeUseLocationIds = Array.from(
+    new Set(
+      recipeSiteUses
+        .flatMap((use) => [
+          use.sourceLocationId,
+          use.destinationLocationId,
+        ])
+        .filter((value): value is string => Boolean(value)),
+    ),
+  );
+
+  let recipeUseLocationRows: Array<{
+    id: string;
+    site_id: string | null;
+    area_id: string | null;
+    is_active: boolean | null;
+  }> = [];
+
+  if (recipeUseLocationIds.length > 0) {
+    const { data: locationRows, error: locationRowsErr } = await supabase
+      .from("inventory_locations")
+      .select("id,site_id,area_id,is_active")
+      .in("id", recipeUseLocationIds);
+
+    if (locationRowsErr) {
+      redirect(withQuery(returnBase, "error", locationRowsErr.message));
+    }
+
+    recipeUseLocationRows = (locationRows ?? []) as typeof recipeUseLocationRows;
+  }
+
+  const recipeUseLocationById = new Map(
+    recipeUseLocationRows.map((location) => [location.id, location]),
+  );
+
+  recipeSiteUses = recipeSiteUses.map((use) => {
+    const sourceLocation = use.sourceLocationId
+      ? recipeUseLocationById.get(use.sourceLocationId)
+      : null;
+    const destinationLocation = use.destinationLocationId
+      ? recipeUseLocationById.get(use.destinationLocationId)
+      : null;
+
+    if (use.sourceLocationId && !sourceLocation) {
+      redirect(
+        withQuery(
+          returnBase,
+          "error",
+          "El LOC origen seleccionado no existe o no esta disponible.",
+        ),
+      );
+    }
+
+    if (use.destinationLocationId && !destinationLocation) {
+      redirect(
+        withQuery(
+          returnBase,
+          "error",
+          "El LOC destino seleccionado no existe o no esta disponible.",
+        ),
+      );
+    }
+
+    if (
+      sourceLocation?.site_id &&
+      String(sourceLocation.site_id) !== use.siteId
+    ) {
+      redirect(
+        withQuery(
+          returnBase,
+          "error",
+          "El LOC origen seleccionado pertenece a otra sede.",
+        ),
+      );
+    }
+
+    if (
+      destinationLocation?.site_id &&
+      String(destinationLocation.site_id) !== use.siteId
+    ) {
+      redirect(
+        withQuery(
+          returnBase,
+          "error",
+          "El LOC destino seleccionado pertenece a otra sede.",
+        ),
+      );
+    }
+
+    const sourceAreaId = sourceLocation?.area_id
+      ? String(sourceLocation.area_id)
+      : "";
+    const destinationAreaId = destinationLocation?.area_id
+      ? String(destinationLocation.area_id)
+      : "";
+
+    if (use.usageMode === "no_inventory") {
+      return {
+        ...use,
+        areaId: null,
+        sourceLocationId: null,
+        destinationLocationId: null,
+      };
+    }
+
+    if (
+      use.usageMode === "stored_for_production" ||
+      use.usageMode === "sells_finished_good"
+    ) {
+      return {
+        ...use,
+        areaId: sourceAreaId || null,
+        destinationLocationId: null,
+      };
+    }
+
+    if (
+      use.areaId &&
+      sourceAreaId &&
+      sourceAreaId !== use.areaId
+    ) {
+      redirect(
+        withQuery(
+          returnBase,
+          "error",
+          "El LOC origen no pertenece al area del uso. Cambia el area o selecciona un LOC de esa area.",
+        ),
+      );
+    }
+
+    if (
+      use.usageMode === "produces_here" &&
+      use.areaId &&
+      destinationAreaId &&
+      destinationAreaId !== use.areaId
+    ) {
+      redirect(
+        withQuery(
+          returnBase,
+          "error",
+          "El LOC destino no pertenece al area del uso. Cambia el area o selecciona un LOC de esa area.",
+        ),
+      );
+    }
+
+    return use;
+  });
+
+  primaryUse = selectPrimaryRecipeUse(recipeSiteUses);
+  if (primaryUse) {
+    siteId = primaryUse.siteId;
+    areaId = primaryUse.areaId ?? "";
+    returnBase = baseNewPath(siteId, areaId, productId, source);
   }
 
   const ingredientRaw = asText(formData.get("ingredient_lines"));
@@ -392,12 +749,21 @@ async function saveRecipe(formData: FormData) {
   }
 
   if (status === "published") {
+    if (recipeSiteUses.length <= 0) {
+      redirect(
+        withQuery(
+          returnBase,
+          "error",
+          "Para publicar debes seleccionar al menos una sede donde aplica la receta.",
+        ),
+      );
+    }
     if (!siteId || !areaId) {
       redirect(
         withQuery(
           returnBase,
           "error",
-          "Para publicar debes seleccionar sede y area productiva.",
+          "Para publicar debes seleccionar una sede productiva o de preparacion con area.",
         ),
       );
     }
@@ -434,6 +800,49 @@ async function saveRecipe(formData: FormData) {
           returnBase,
           "error",
           "Para publicar debes tener al menos 1 paso de preparacion.",
+        ),
+      );
+    }
+  }
+
+  for (const use of recipeSiteUses) {
+    if (
+      (use.usageMode === "produces_here" ||
+        use.usageMode === "prepares_to_order") &&
+      (!use.areaId || !use.sourceLocationId)
+    ) {
+      redirect(
+        withQuery(
+          returnBase,
+          "error",
+          "Configura en NEXO el area y LOC de insumos para las sedes que producen o preparan al momento.",
+        ),
+      );
+    }
+    if (use.usageMode === "produces_here" && !use.destinationLocationId) {
+      redirect(
+        withQuery(
+          returnBase,
+          "error",
+          "Configura en NEXO el LOC donde queda el terminado para las sedes que producen aqui.",
+        ),
+      );
+    }
+    if (use.usageMode === "sells_finished_good" && !use.sourceLocationId) {
+      redirect(
+        withQuery(
+          returnBase,
+          "error",
+          "Las sedes que venden terminado necesitan LOC de salida.",
+        ),
+      );
+    }
+    if (use.usageMode === "stored_for_production" && !use.sourceLocationId) {
+      redirect(
+        withQuery(
+          returnBase,
+          "error",
+          "Las sedes que almacenan para producir necesitan LOC donde queda disponible para consumo.",
         ),
       );
     }
@@ -577,8 +986,59 @@ async function saveRecipe(formData: FormData) {
     ];
 
     const { error: outputsErr } = await supabase.from("recipe_outputs").insert(outputRows);
-    if (outputsErr) {
+  if (outputsErr) {
       redirect(withQuery(returnBase, "error", outputsErr.message));
+    }
+  }
+
+  if (recipeSiteUses.length > 0) {
+    const { error: insertUsesErr } = await supabase
+      .from("recipe_site_uses")
+      .insert(
+        recipeSiteUses.map((use) => ({
+          recipe_card_id: recipeCardId,
+          product_id: productId,
+          site_id: use.siteId,
+          usage_mode: use.usageMode,
+          area_id: use.areaId,
+          source_location_id: use.sourceLocationId,
+          destination_location_id: use.destinationLocationId,
+          is_active: true,
+          updated_by: null,
+        })),
+      );
+    if (insertUsesErr) {
+      redirect(withQuery(returnBase, "error", insertUsesErr.message));
+    }
+
+    const { error: settingsErr } = await supabase
+      .from("product_site_settings")
+      .upsert(
+        recipeSiteUses.map((use) => {
+          const producesLocally =
+            use.usageMode === "produces_here" ||
+            use.usageMode === "prepares_to_order";
+          const sells =
+            use.usageMode === "sells_finished_good" ||
+            use.usageMode === "prepares_to_order";
+          const keepsInventory = use.usageMode !== "no_inventory";
+
+          return {
+            product_id: productId,
+            site_id: use.siteId,
+            is_active: keepsInventory,
+            local_production_enabled: producesLocally,
+            sales_enabled: sells || null,
+            inventory_enabled: keepsInventory,
+            production_location_id: producesLocally
+              ? use.sourceLocationId
+              : null,
+          };
+        }),
+        { onConflict: "product_id,site_id" },
+      );
+    if (settingsErr) {
+      redirect(withQuery(returnBase, "error", settingsErr.message));
     }
   }
 
@@ -758,12 +1218,16 @@ function RecipeFormSafetyScript() {
 
   form.addEventListener("submit", function (event) {
     var status = fieldValue("status").toLowerCase() || "draft";
-    var siteId = fieldValue("site_id");
-    var areaId = fieldValue("area_id");
 
-    if (status === "published" && (!siteId || !areaId)) {
+    var enabledSiteUses = Array.prototype.slice
+      .call(form.querySelectorAll('input[name^="site_use_enabled_"]'))
+      .some(function (field) {
+        return field.checked || field.value === "1";
+      });
+
+    if (status === "published" && !enabledSiteUses) {
       event.preventDefault();
-      showClientError("Para publicar debes seleccionar sede y area productiva. No se envio el formulario, asi que no se pierde lo que escribiste.");
+      showClientError("Para publicar debes seleccionar al menos una sede donde aplica la receta. No se envio el formulario, asi que no se pierde lo que escribiste.");
       return false;
     }
 
@@ -944,6 +1408,104 @@ export default async function NewRecipePage({
   const selectedProduct =
     productsWithoutRecipe.find((row) => row.id === selectedProductId) ?? null;
 
+  const [
+    { data: productSiteSettingsData },
+    { data: allAreasData },
+    { data: inventoryLocationsData },
+  ] = selectedProductId
+    ? await Promise.all([
+        supabase
+          .from("product_site_settings")
+          .select(
+            "site_id,product_id,is_active,local_production_enabled,sales_enabled,inventory_enabled,production_location_id",
+          )
+          .eq("product_id", selectedProductId),
+        employeeSiteIds.length
+          ? supabase
+              .from("areas")
+              .select("id,code,name,kind,site_id")
+              .in("site_id", employeeSiteIds)
+              .eq("is_active", true)
+          : Promise.resolve({ data: [] as AreaOption[] }),
+        employeeSiteIds.length
+          ? supabase
+              .from("inventory_locations")
+              .select(
+                "id,site_id,area_id,code,zone,description,location_type,is_active",
+              )
+              .in("site_id", employeeSiteIds)
+              .eq("is_active", true)
+              .order("code", { ascending: true })
+          : Promise.resolve({ data: [] as InventoryLocationOption[] }),
+      ])
+    : [
+        { data: [] as ProductSiteSettingRow[] },
+        { data: [] as AreaOption[] },
+        { data: [] as InventoryLocationOption[] },
+      ];
+
+  const productSiteSettings = (productSiteSettingsData ??
+    []) as ProductSiteSettingRow[];
+  const allAreas = ((allAreasData ?? []) as AreaOption[])
+    .filter((area) => !isStandalonePanaderiaArea(area))
+    .sort(sortProductionAreas);
+  const inventoryLocations = (inventoryLocationsData ??
+    []) as InventoryLocationOption[];
+  const productSiteSettingBySiteId = new Map(
+    productSiteSettings.map((setting) => [setting.site_id, setting]),
+  );
+  const areasBySiteId = allAreas.reduce((map, area) => {
+    const key = String(area.site_id ?? "");
+    if (!key) return map;
+    const list = map.get(key) ?? [];
+    list.push(area);
+    map.set(key, list);
+    return map;
+  }, new Map<string, AreaOption[]>());
+  const locationsBySiteId = inventoryLocations.reduce((map, location) => {
+    const list = map.get(location.site_id) ?? [];
+    list.push(location);
+    map.set(location.site_id, list);
+    return map;
+  }, new Map<string, InventoryLocationOption[]>());
+  const areaNameById = new Map(
+    allAreas.map((area) => [area.id, areaLabel(area)]),
+  );
+  const locationOptionLabel = (location: InventoryLocationOption) => {
+    const areaName = location.area_id
+      ? areaNameById.get(location.area_id)
+      : "";
+    return areaName
+      ? `${locationLabel(location)} · ${areaName}`
+      : `${locationLabel(location)} · Sin area`;
+  };
+  const locationOptionsForArea = (
+    locations: InventoryLocationOption[],
+    selectedAreaId: string,
+    selectedLocationId: string,
+  ) => {
+    const selected = locations.find((location) => location.id === selectedLocationId);
+    if (!selectedAreaId) return locations;
+
+    const matching = locations.filter(
+      (location) => String(location.area_id ?? "") === selectedAreaId,
+    );
+    const unassigned = locations.filter((location) => !location.area_id);
+
+    if (matching.length > 0) {
+      const options = [...matching, ...unassigned];
+      if (selected && !options.some((location) => location.id === selected.id)) {
+        options.push(selected);
+      }
+      return options;
+    }
+
+    if (locations.length === 1) return locations;
+    if (selected) return [selected, ...locations.filter((location) => location.id !== selected.id)];
+
+    return locations;
+  };
+
   const initialIngredientLines: IngredientLine[] = [];
   const initialSteps: RecipeStepLine[] = [];
 
@@ -985,6 +1547,78 @@ export default async function NewRecipePage({
     requestedAreaId && areas.some((area) => area.id === requestedAreaId)
       ? requestedAreaId
       : "";
+
+  const siteById = new Map(sites.map((site) => [site.id, site]));
+  const configuredSiteIds = new Set(
+    productSiteSettings
+      .filter(
+        (setting) =>
+          setting.is_active ||
+          setting.local_production_enabled ||
+          setting.sales_enabled ||
+          setting.inventory_enabled,
+      )
+      .map((setting) => setting.site_id)
+      .filter(Boolean),
+  );
+  const visibleRecipeUseSiteIds = new Set<string>();
+
+  for (const siteId of configuredSiteIds) visibleRecipeUseSiteIds.add(siteId);
+  if (formSiteId) visibleRecipeUseSiteIds.add(formSiteId);
+
+  const visibleRecipeUseSites = Array.from(visibleRecipeUseSiteIds)
+    .map((siteId) => siteById.get(siteId))
+    .filter((site): site is SiteOption => Boolean(site))
+    .sort((a, b) => siteLabel(a).localeCompare(siteLabel(b), "es"));
+
+  const recipeUseSites = visibleRecipeUseSites.length > 0 ? visibleRecipeUseSites : sites;
+  const recipeUseRows = recipeUseSites.map((site) => {
+    const setting = productSiteSettingBySiteId.get(site.id) ?? null;
+    const isCurrentRecipeSite = formSiteId === site.id;
+    const productSiteEnabled = Boolean(
+      setting?.is_active ||
+      setting?.local_production_enabled ||
+      setting?.sales_enabled ||
+      setting?.inventory_enabled,
+    );
+    const usageMode =
+      productSiteEnabled
+        ? setting?.local_production_enabled
+          ? "produces_here"
+          : setting?.sales_enabled
+            ? "sells_finished_good"
+            : setting?.inventory_enabled
+              ? "stored_for_production"
+              : "stored_for_production"
+        : isCurrentRecipeSite
+          ? "produces_here"
+          : "stored_for_production";
+    const enabled = Boolean(isCurrentRecipeSite || productSiteEnabled);
+    const siteAreas = areasBySiteId.get(site.id) ?? [];
+    const siteLocations = locationsBySiteId.get(site.id) ?? [];
+    const selectedSourceLocationId = setting?.production_location_id ?? "";
+    const sourceLocationAreaId = selectedSourceLocationId
+      ? siteLocations.find((location) => location.id === selectedSourceLocationId)?.area_id ?? ""
+      : "";
+    const selectedAreaId =
+      (isCurrentRecipeSite && formAreaId ? formAreaId : "") ||
+      sourceLocationAreaId ||
+      siteAreas[0]?.id ||
+      "";
+
+    return {
+      site,
+      enabled,
+      usageMode,
+      isProductionCenter: String(site.site_type ?? "").trim() === "production_center",
+      areas: siteAreas,
+      locations: siteLocations,
+      selectedAreaId,
+      selectedSourceLocationId,
+      selectedDestinationLocationId: "",
+    };
+  });
+  const visibleRecipeUseRows = recipeUseRows.filter((row) => !row.isProductionCenter);
 
   return (
     <div className="space-y-6">
@@ -1071,6 +1705,212 @@ export default async function NewRecipePage({
               />
               <span className="ui-label">Receta activa</span>
             </label>
+          </div>
+        </section>
+
+        <section className="ui-panel space-y-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="ui-h2">Disponibilidad por sede</h2>
+              <p className="mt-1 max-w-3xl text-sm text-[var(--ui-muted)]">
+                Marca los satelites donde aplica esta receta. El centro produce
+                para remision y la ruta de LOCs se toma de NEXO.
+              </p>
+            </div>
+            <span className="ui-chip">
+              {visibleRecipeUseRows.filter((row) => row.enabled).length} activa(s)
+            </span>
+          </div>
+
+          {recipeUseRows
+            .filter((row) => row.isProductionCenter)
+            .map((row) => (
+              <div key={`hidden-${row.site.id}`} hidden>
+                <input name="site_use_site_id" value={row.site.id} readOnly />
+                {row.enabled ? (
+                  <input
+                    name={`site_use_enabled_${row.site.id}`}
+                    value="1"
+                    readOnly
+                  />
+                ) : null}
+                <input
+                  name={`site_use_mode_${row.site.id}`}
+                  value={row.usageMode}
+                  readOnly
+                />
+                <input
+                  name={`site_use_area_${row.site.id}`}
+                  value={row.selectedAreaId}
+                  readOnly
+                />
+                <input
+                  name={`site_use_source_loc_${row.site.id}`}
+                  value={row.selectedSourceLocationId}
+                  readOnly
+                />
+                <input
+                  name={`site_use_destination_loc_${row.site.id}`}
+                  value={row.selectedDestinationLocationId}
+                  readOnly
+                />
+              </div>
+            ))}
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            {visibleRecipeUseRows.length ? (
+              visibleRecipeUseRows.map((row) => {
+                const sourceLocationOptions = locationOptionsForArea(
+                  row.locations,
+                  row.selectedAreaId,
+                  row.selectedSourceLocationId,
+                );
+                const destinationLocationOptions = locationOptionsForArea(
+                  row.locations,
+                  row.selectedAreaId,
+                  row.selectedDestinationLocationId,
+                );
+
+                return (
+                  <div
+                    key={row.site.id}
+                    className="rounded-2xl border border-[var(--ui-border)] bg-white p-4 shadow-sm"
+                  >
+                    <input
+                      type="hidden"
+                      name="site_use_site_id"
+                      value={row.site.id}
+                    />
+
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <label className="flex min-w-0 flex-1 items-start gap-3">
+                        <input
+                          type="checkbox"
+                          name={`site_use_enabled_${row.site.id}`}
+                          value="1"
+                          defaultChecked={row.enabled}
+                          className="mt-1"
+                        />
+                        <span className="min-w-0">
+                          <span className="block font-semibold text-[var(--ui-text)]">
+                            {siteLabel(row.site)}
+                          </span>
+                          <span className="mt-1 block text-xs text-[var(--ui-muted)]">
+                            {row.site.site_type ?? "sede"}
+                          </span>
+                        </span>
+                      </label>
+
+                      <span className={`ui-chip ${row.enabled ? "ui-chip--success" : ""}`}>
+                        {row.enabled ? "Activa" : "Inactiva"}
+                      </span>
+                    </div>
+
+                    <div className="mt-4 space-y-3">
+                      <label className="block space-y-1">
+                        <span className="ui-label">Uso operativo</span>
+                        <select
+                          name={`site_use_mode_${row.site.id}`}
+                          defaultValue={row.usageMode}
+                          className="ui-input w-full bg-white"
+                          aria-label={`Uso de ${siteLabel(row.site)}`}
+                        >
+                          <option value="produces_here">
+                            {usageLabel("produces_here")}
+                          </option>
+                          <option value="stored_for_production">
+                            {usageLabel("stored_for_production")}
+                          </option>
+                          <option value="sells_finished_good">
+                            {usageLabel("sells_finished_good")}
+                          </option>
+                          <option value="prepares_to_order">
+                            {usageLabel("prepares_to_order")}
+                          </option>
+                          <option value="no_inventory">
+                            {usageLabel("no_inventory")}
+                          </option>
+                        </select>
+                        <span className="block text-xs leading-5 text-[var(--ui-muted)]">
+                          {usageHelp(row.usageMode)}
+                        </span>
+                      </label>
+
+                      <details className="rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface-2)] p-3">
+                        <summary className="cursor-pointer text-sm font-semibold text-[var(--ui-text)]">
+                          Ajuste avanzado de LOCs
+                        </summary>
+                        <div className="mt-3 grid gap-3 md:grid-cols-3">
+                          <label className="block min-w-0 space-y-1">
+                            <span className="ui-label">Area</span>
+                            <select
+                              name={`site_use_area_${row.site.id}`}
+                              defaultValue={row.selectedAreaId}
+                              className="ui-input w-full bg-white"
+                              aria-label={`Area de ${siteLabel(row.site)}`}
+                            >
+                              <option value="">Sin area</option>
+                              {row.areas.map((area) => (
+                                <option key={area.id} value={area.id}>
+                                  {areaLabel(area)}
+                                </option>
+                              ))}
+                            </select>
+                            <span className="block text-xs text-[var(--ui-muted)]">
+                              {row.areas.length} area(s)
+                            </span>
+                          </label>
+
+                          <label className="block min-w-0 space-y-1">
+                            <span className="ui-label">LOC origen / salida</span>
+                            <select
+                              name={`site_use_source_loc_${row.site.id}`}
+                              defaultValue={row.selectedSourceLocationId}
+                              className="ui-input w-full bg-white"
+                              aria-label={`LOC origen de ${siteLabel(row.site)}`}
+                            >
+                              <option value="">Sin LOC</option>
+                              {sourceLocationOptions.map((location) => (
+                                <option key={location.id} value={location.id}>
+                                  {locationOptionLabel(location)}
+                                </option>
+                              ))}
+                            </select>
+                            <span className="block text-xs text-[var(--ui-muted)]">
+                              {sourceLocationOptions.length} LOC(s) disponible(s)
+                            </span>
+                          </label>
+
+                          <label className="block min-w-0 space-y-1">
+                            <span className="ui-label">LOC destino</span>
+                            <select
+                              name={`site_use_destination_loc_${row.site.id}`}
+                              defaultValue={row.selectedDestinationLocationId}
+                              className="ui-input w-full bg-white"
+                              aria-label={`LOC destino de ${siteLabel(row.site)}`}
+                            >
+                              <option value="">Sin LOC</option>
+                              {destinationLocationOptions.map((location) => (
+                                <option key={location.id} value={location.id}>
+                                  {locationOptionLabel(location)}
+                                </option>
+                              ))}
+                            </select>
+                            <span className="block text-xs text-[var(--ui-muted)]">
+                              Solo requerido cuando esta sede produce el item.
+                            </span>
+                          </label>
+                        </div>
+                      </details>
+                    </div>
+                  </div>
+                );
+              })
+            ) : (
+              <div className="rounded-2xl border border-[var(--ui-border)] bg-white px-4 py-8 text-center text-[var(--ui-muted)]">
+                No hay sedes disponibles para configurar.
+              </div>
+            )}
           </div>
         </section>
 

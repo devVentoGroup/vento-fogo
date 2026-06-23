@@ -1,7 +1,11 @@
 ﻿import Link from "next/link";
 
 import { requireAppAccess } from "@/lib/auth/guard";
-import { checkPermission } from "@/lib/auth/permissions";
+import {
+  canUseRoleOverride,
+  checkPermissionWithRoleOverride,
+  getRoleOverrideFromCookies,
+} from "@/lib/auth/role-override";
 import { formatProductionQuantity, productionUnitName } from "@/features/recipes/recipe-units";
 
 export const dynamic = "force-dynamic";
@@ -313,21 +317,28 @@ export default async function RecipeBookPage({
     returnTo: "/recipe-book",
   });
 
-  const [{ data: currentSite }, { data: currentArea }, { data: employeeRow }] = await Promise.all([
+  const [{ data: currentSite }, { data: employeeRow }] = await Promise.all([
     supabase.rpc("current_employee_site_id"),
-    supabase.rpc("current_employee_area_id"),
     supabase.from("employees").select("role").eq("id", user.id).maybeSingle(),
   ]);
 
   const currentSiteId = String(currentSite ?? "");
-  const currentAreaId = String(currentArea ?? "");
-  const role = String(employeeRow?.role ?? "").trim();
-  const isOwnerScope = ["propietario", "gerente_general"].includes(role);
-  const isManagement = isOwnerScope || role === "gerente";
+  const actualRole = String(employeeRow?.role ?? "").trim();
+  const overrideRole = await getRoleOverrideFromCookies();
+  const effectiveRole = canUseRoleOverride(actualRole, overrideRole) ? String(overrideRole) : actualRole;
+  const isOwnerScope = ["propietario", "gerente_general"].includes(effectiveRole);
+  const isManagement = isOwnerScope || effectiveRole === "gerente";
+  const activeSiteId = requestedSiteId || currentSiteId;
 
-  const canViewRecipeBook = await checkPermission(supabase, APP_ID, "production.recipe_book.view", {
-    siteId: isOwnerScope ? undefined : currentSiteId || undefined,
-    areaId: isManagement ? undefined : currentAreaId || undefined,
+  const canViewRecipeBook = await checkPermissionWithRoleOverride({
+    supabase,
+    appId: APP_ID,
+    code: "production.recipe_book.view",
+    context: {
+      siteId: isOwnerScope ? undefined : activeSiteId || undefined,
+      areaId: undefined,
+    },
+    actualRole,
   });
 
   if (!canViewRecipeBook) {
@@ -353,7 +364,7 @@ export default async function RecipeBookPage({
   const siteFilterIsUnassigned = isOwnerScope && requestedSiteId === UNASSIGNED_SITE_ID;
   const selectedSiteId = isOwnerScope
     ? (siteFilterIsUnassigned ? UNASSIGNED_SITE_ID : requestedSiteId)
-    : (currentSiteId || requestedSiteId);
+    : activeSiteId;
   const realSelectedSiteId = siteFilterIsUnassigned ? "" : selectedSiteId;
   const selectedStatus = "published";
   const allowedStatuses = ["published"];
@@ -468,7 +479,7 @@ export default async function RecipeBookPage({
     requestedAreaId === UNASSIGNED_AREA_ID || areas.some((area) => area.id === requestedAreaId);
   const selectedAreaId = isManagement
     ? (requestedAreaIsValid ? requestedAreaId : "")
-    : (currentAreaId || "");
+    : "";
 
   const recipes = allRecipes
     .filter((recipe) => {
@@ -505,9 +516,15 @@ export default async function RecipeBookPage({
   const permissionAreaId = selectedRecipe?.area_id || (selectedAreaId && selectedAreaId !== UNASSIGNED_AREA_ID ? selectedAreaId : null);
   const canCreateBatch =
     selectedRecipe && selectedRecipeIsPublished
-      ? await checkPermission(supabase, APP_ID, "production.batches.create", {
-          siteId: permissionSiteId,
-          areaId: permissionAreaId,
+      ? await checkPermissionWithRoleOverride({
+          supabase,
+          appId: APP_ID,
+          code: "production.batches.create",
+          context: {
+            siteId: permissionSiteId,
+            areaId: permissionAreaId,
+          },
+          actualRole,
         })
       : false;
 

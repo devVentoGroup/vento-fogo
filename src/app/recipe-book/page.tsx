@@ -311,7 +311,6 @@ export default async function RecipeBookPage({
   const { supabase, user } = await requireAppAccess({
     appId: APP_ID,
     returnTo: "/recipe-book",
-    permissionCode: "production.recipe_book.view",
   });
 
   const [{ data: currentSite }, { data: currentArea }, { data: employeeRow }] = await Promise.all([
@@ -325,6 +324,32 @@ export default async function RecipeBookPage({
   const role = String(employeeRow?.role ?? "").trim();
   const isOwnerScope = ["propietario", "gerente_general"].includes(role);
   const isManagement = isOwnerScope || role === "gerente";
+
+  const canViewRecipeBook = await checkPermission(supabase, APP_ID, "production.recipe_book.view", {
+    siteId: isOwnerScope ? undefined : currentSiteId || undefined,
+    areaId: isManagement ? undefined : currentAreaId || undefined,
+  });
+
+  if (!canViewRecipeBook) {
+    return (
+      <div className="space-y-6">
+        <section className="rounded-[var(--ui-radius-card)] border border-[#FED7AA] bg-[#FFF7ED] p-6 shadow-[var(--ui-shadow-soft)] md:p-8">
+          <span className="inline-flex rounded-full bg-white px-3 py-1 text-xs font-semibold uppercase text-[#C2410C]">
+            Recetario FOGO
+          </span>
+          <h1 className="mt-4 max-w-3xl text-3xl font-semibold leading-tight text-[var(--ui-text)] md:text-5xl">
+            Sin permiso para ver este recetario
+          </h1>
+          <p className="mt-3 max-w-2xl text-base leading-7 text-[var(--ui-muted)]">
+            Tu rol no tiene habilitado production.recipe_book.view para la sede o area activa.
+          </p>
+          <Link href="/" className="ui-btn ui-btn--ghost ui-btn--sm mt-5">
+            Volver al inicio
+          </Link>
+        </section>
+      </div>
+    );
+  }
   const siteFilterIsUnassigned = isOwnerScope && requestedSiteId === UNASSIGNED_SITE_ID;
   const selectedSiteId = isOwnerScope
     ? (siteFilterIsUnassigned ? UNASSIGNED_SITE_ID : requestedSiteId)

@@ -330,6 +330,27 @@ export default async function RecipeBookPage({
   const isManagement = isOwnerScope || effectiveRole === "gerente";
   const activeSiteId = requestedSiteId || currentSiteId;
 
+  if (!isOwnerScope && !activeSiteId) {
+    return (
+      <div className="space-y-6">
+        <section className="rounded-[var(--ui-radius-card)] border border-[#FED7AA] bg-[#FFF7ED] p-6 shadow-[var(--ui-shadow-soft)] md:p-8">
+          <span className="inline-flex rounded-full bg-white px-3 py-1 text-xs font-semibold uppercase text-[#C2410C]">
+            Recetario FOGO
+          </span>
+          <h1 className="mt-4 max-w-3xl text-3xl font-semibold leading-tight text-[var(--ui-text)] md:text-5xl">
+            Selecciona una sede activa
+          </h1>
+          <p className="mt-3 max-w-2xl text-base leading-7 text-[var(--ui-muted)]">
+            Para roles operativos, FOGO muestra las recetas de la sede activa. Selecciona una sede o haz check-in en Anima.
+          </p>
+          <Link href="/" className="ui-btn ui-btn--ghost ui-btn--sm mt-5">
+            Volver al inicio
+          </Link>
+        </section>
+      </div>
+    );
+  }
+
   const canViewRecipeBook = await checkPermissionWithRoleOverride({
     supabase,
     appId: APP_ID,
@@ -513,20 +534,17 @@ export default async function RecipeBookPage({
       : 1;
 
   const permissionSiteId = selectedRecipe?.site_id || (!isOwnerScope ? selectedSiteId : currentSiteId);
-  const permissionAreaId = selectedRecipe?.area_id || (selectedAreaId && selectedAreaId !== UNASSIGNED_AREA_ID ? selectedAreaId : null);
-  const canCreateBatch =
-    selectedRecipe && selectedRecipeIsPublished
-      ? await checkPermissionWithRoleOverride({
-          supabase,
-          appId: APP_ID,
-          code: "production.batches.create",
-          context: {
-            siteId: permissionSiteId,
-            areaId: permissionAreaId,
-          },
-          actualRole,
-        })
-      : false;
+  const canCreateBatchInSite = await checkPermissionWithRoleOverride({
+    supabase,
+    appId: APP_ID,
+    code: "production.batches.create",
+    context: {
+      siteId: permissionSiteId || undefined,
+      areaId: undefined,
+    },
+    actualRole,
+  });
+  const canCreateBatch = Boolean(selectedRecipe && selectedRecipeIsPublished && canCreateBatchInSite);
 
   const [{ data: ingredientLineRows }, { data: stepRows }] = selectedRecipe
     ? await Promise.all([
@@ -593,8 +611,9 @@ export default async function RecipeBookPage({
         : isOwnerScope
           ? "Todas las sedes"
           : "";
-  const selectedAreaName =
-    selectedAreaId === UNASSIGNED_AREA_ID
+  const selectedAreaName = !isManagement
+    ? "Toda la sede"
+    : selectedAreaId === UNASSIGNED_AREA_ID
       ? "Sin area"
       : selectedRecipe?.area_id
         ? areaLabel(one(selectedRecipe.areas))
@@ -742,13 +761,13 @@ export default async function RecipeBookPage({
           <Link href={detailHref} className="ui-btn ui-btn--ghost ui-btn--sm flex-1">
             Ver ficha
           </Link>
-          {isPublished ? (
+          {isPublished && canCreateBatchInSite ? (
             <Link href={produceHref} className="ui-btn ui-btn--brand ui-btn--sm flex-1">
               Producir lote
             </Link>
           ) : (
             <span className="ui-btn ui-btn--ghost ui-btn--sm pointer-events-none flex-1 opacity-70">
-              Borrador
+              {isPublished ? "Solo lectura" : "Borrador"}
             </span>
           )}
         </div>

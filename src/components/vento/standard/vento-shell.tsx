@@ -1,4 +1,6 @@
-﻿import { checkPermissionWithRoleOverride } from "@/lib/auth/role-override";
+﻿import { cookies } from "next/headers";
+
+import { checkPermissionWithRoleOverride } from "@/lib/auth/role-override";
 import { createClient } from "@/lib/supabase/server";
 import { VentoChrome } from "./vento-chrome";
 
@@ -12,6 +14,10 @@ type SiteRow = {
 type EmployeeSiteRow = {
   site_id: string | null;
   is_primary: boolean | null;
+};
+
+type EmployeeSettingsRow = {
+  selected_site_id: string | null;
 };
 
 type AppStatus = "active" | "soon";
@@ -83,6 +89,7 @@ const APP_ENTITY =
     | "aura") ?? "fogo";
 
 const APP_CODE = APP_ENTITY === "default" ? "fogo" : APP_ENTITY;
+const SITE_OVERRIDE_COOKIE = "fogo_site_override_id";
 
 const ICON_NAMES = new Set<IconName>([
   "dashboard",
@@ -183,6 +190,14 @@ const APP_SWITCHER_ITEMS: Omit<AppSwitcherItem, "access">[] = [
   },
 ];
 
+function asId(value: unknown) {
+  return String(value ?? "").trim();
+}
+
+function uniqueIds(values: Array<string | null | undefined>) {
+  return Array.from(new Set(values.map(asId).filter(Boolean)));
+}
+
 function isOperationalSite(site: SiteRow): boolean {
   return String(site.operational_visibility ?? "operational") === "operational";
 }
@@ -250,10 +265,12 @@ function buildNavGroups(rows: NavigationRow[]): NavGroup[] {
 async function resolveAllowedApps({
   supabase,
   activeSiteId,
+  activeAreaId,
   actualRole,
 }: {
   supabase: SupabaseClient;
   activeSiteId: string;
+  activeAreaId: string;
   actualRole: string;
 }): Promise<AppSwitcherItem[]> {
   const resolved = await Promise.all(
@@ -278,7 +295,7 @@ async function resolveAllowedApps({
         code: "access",
         context: {
           siteId: activeSiteId || null,
-          areaId: null,
+          areaId: activeAreaId || null,
         },
         actualRole,
       });
@@ -297,11 +314,13 @@ async function resolveNavigationItems({
   supabase,
   appCode,
   activeSiteId,
+  activeAreaId,
   actualRole,
 }: {
   supabase: SupabaseClient;
   appCode: string;
   activeSiteId: string;
+  activeAreaId: string;
   actualRole: string;
 }): Promise<NavGroup[]> {
   const { data, error } = await supabase
@@ -334,7 +353,7 @@ async function resolveNavigationItems({
         code,
         context: {
           siteId: activeSiteId || null,
-          areaId: null,
+          areaId: activeAreaId || null,
         },
         actualRole,
       });
@@ -355,6 +374,7 @@ export async function VentoShell({ children }: { children: React.ReactNode }) {
   let role: string | null = null;
   let sites: SiteRow[] = [];
   let activeSiteId = "";
+  let activeAreaId = "";
   let appSwitcherItems: AppSwitcherItem[] = [];
   let navGroups: NavGroup[] = [];
 
@@ -369,30 +389,60 @@ export async function VentoShell({ children }: { children: React.ReactNode }) {
     displayName =
       employeeRow?.alias ?? employeeRow?.full_name ?? user.email ?? "Usuario";
 
-    const { data: employeeSites } = await supabase
-      .from("employee_sites")
-      .select("site_id,is_primary")
-      .eq("employee_id", user.id)
-      .eq("is_active", true)
-      .order("is_primary", { ascending: false })
-      .limit(50);
+    const cookieStore = await cookies();
+    const siteOverrideId = asId(cookieStore.get(SITE_OVERRIDE_COOKIE)?.value);
+
+    const [
+      { data: employeeSites },
+      { data: employeeSettings },
+      { data: currentEmployeeSite },
+      { data: currentEmployeeArea },
+    ] = await Promise.all([
+      supabase
+        .from("employee_sites")
+        .select("site_id,is_primary")
+        .eq("employee_id", user.id)
+        .eq("is_active", true)
+        .order("is_primary", { ascending: false })
+        .limit(50),
+      supabase
+        .from("employee_settings")
+        .select("selected_site_id")
+        .eq("employee_id", user.id)
+        .maybeSingle(),
+      supabase.rpc("current_employee_site_id"),
+      supabase.rpc("current_employee_area_id"),
+    ]);
 
     const employeeSiteRows = (employeeSites ?? []) as EmployeeSiteRow[];
+    const settingsRow = employeeSettings as EmployeeSettingsRow | null;
 
-    const defaultSiteId =
-      employeeSiteRows[0]?.site_id ?? employeeRow?.site_id ?? "";
+    const assignedSiteIds = uniqueIds([
+      ...employeeSiteRows.map((row) => row.site_id),
+      employeeRow?.site_id ?? null,
+    ]);
 
-    activeSiteId = defaultSiteId ?? "";
+    const preferredSiteId = asId(
+      siteOverrideId ||
+        settingsRow?.selected_site_id ||
+        currentEmployeeSite ||
+        employeeSiteRows[0]?.site_id ||
+        employeeRow?.site_id ||
+        ""
+    );
 
-    const siteIds = employeeSiteRows
-      .map((row) => row.site_id)
-      .filter((id): id is string => Boolean(id));
+    activeSiteId =
+      preferredSiteId && assignedSiteIds.includes(preferredSiteId)
+        ? preferredSiteId
+        : assignedSiteIds[0] ?? "";
 
-    if (siteIds.length) {
+    activeAreaId = asId(currentEmployeeArea);
+
+    if (assignedSiteIds.length) {
       const { data: siteRows } = await supabase
         .from("sites")
         .select("id,name,site_type,operational_visibility")
-        .in("id", siteIds)
+        .in("id", assignedSiteIds)
         .order("name", { ascending: true });
 
       sites = ((siteRows ?? []) as SiteRow[]).filter(isOperationalSite);
@@ -402,17 +452,31 @@ export async function VentoShell({ children }: { children: React.ReactNode }) {
       }
     }
 
+    if (activeAreaId) {
+      const { data: activeArea } = await supabase
+        .from("areas")
+        .select("site_id")
+        .eq("id", activeAreaId)
+        .maybeSingle();
+
+      if (String(activeArea?.site_id ?? "") !== activeSiteId) {
+        activeAreaId = "";
+      }
+    }
+
     if (role) {
       const [resolvedApps, resolvedNavGroups] = await Promise.all([
         resolveAllowedApps({
           supabase,
           activeSiteId,
+          activeAreaId,
           actualRole: role,
         }),
         resolveNavigationItems({
           supabase,
           appCode: APP_CODE,
           activeSiteId,
+          activeAreaId,
           actualRole: role,
         }),
       ]);

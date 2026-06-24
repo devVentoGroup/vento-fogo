@@ -64,6 +64,8 @@ type VentoChromeProps = {
   email?: string | null;
   sites: SiteOption[];
   activeSiteId: string;
+  activeContextLabel?: string | null;
+  activeContextDetail?: string | null;
   appSwitcherItems: AppSwitcherItem[];
   navGroups: NavGroup[];
 };
@@ -239,6 +241,40 @@ function SidebarToggleIcon() {
   );
 }
 
+function SidebarContextCard({
+  eyebrow,
+  title,
+  detail,
+  collapsed,
+}: {
+  eyebrow: string;
+  title: string;
+  detail?: string | null;
+  collapsed: boolean;
+}) {
+  return (
+    <div
+      className={`rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] px-4 py-3 shadow-[var(--ui-shadow-soft)] ${
+        collapsed ? "lg:!hidden" : ""
+      }`}
+    >
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ui-muted)]">
+        {eyebrow}
+      </div>
+
+      <div className="mt-1 text-sm font-semibold text-[var(--ui-text)]">
+        {title}
+      </div>
+
+      {detail ? (
+        <div className="mt-1 text-xs leading-snug text-[var(--ui-muted)]">
+          {detail}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function SidebarLink({
   item,
   active,
@@ -283,6 +319,8 @@ export function VentoChrome({
   email,
   sites,
   activeSiteId,
+  activeContextLabel,
+  activeContextDetail,
   appSwitcherItems,
   navGroups,
 }: VentoChromeProps) {
@@ -310,6 +348,8 @@ export function VentoChrome({
   const currentSiteId = activeSiteId ?? "";
   const currentSite = sites.find((site) => site.id === currentSiteId);
   const currentSiteLabel = currentSite?.name ?? currentSiteId ?? "Sin sede";
+  const normalizedActiveContextLabel = String(activeContextLabel ?? "").trim();
+  const normalizedActiveContextDetail = String(activeContextDetail ?? "").trim();
 
   const isActive = (href: string) => {
     if (href === "/") return pathname === "/";
@@ -378,15 +418,22 @@ export function VentoChrome({
             </button>
           </div>
 
-          <div className={`rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] px-4 py-3 shadow-[var(--ui-shadow-soft)] ${sidebarCollapsed ? "lg:!hidden" : ""}`}>
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ui-muted)]">
-              Sede activa
-            </div>
+          <section className="space-y-3">
+            <SidebarContextCard
+              eyebrow="Sede activa"
+              title={currentSiteLabel}
+              collapsed={sidebarCollapsed}
+            />
 
-            <div className="mt-1 text-sm font-semibold text-[var(--ui-text)]">
-              {currentSiteLabel}
-            </div>
-          </div>
+            {normalizedActiveContextLabel ? (
+              <SidebarContextCard
+                eyebrow="Contexto operativo"
+                title={normalizedActiveContextLabel}
+                detail={normalizedActiveContextDetail || null}
+                collapsed={sidebarCollapsed}
+              />
+            ) : null}
+          </section>
 
           <nav className={`flex flex-1 flex-col gap-4 overflow-y-auto pr-1 ${sidebarCollapsed ? "lg:items-center lg:pr-0" : ""}`}>
             {navGroups.length === 0 ? (

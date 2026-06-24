@@ -20,6 +20,26 @@ type EmployeeSettingsRow = {
   selected_site_id: string | null;
 };
 
+type AttendanceLogRow = {
+  action: string | null;
+  site_id: string | null;
+  shift_id: string | null;
+  device_info: Record<string, unknown> | null;
+};
+
+type ShiftContextRow = {
+  id: string;
+  site_id: string | null;
+  operational_role: string | null;
+};
+
+type ActiveWorkContext = {
+  siteId: string;
+  areaId: string;
+  shiftId: string;
+  operationalRole: string;
+};
+
 type AppStatus = "active" | "soon";
 type AppAccess = "enabled" | "disabled" | "soon";
 
@@ -198,6 +218,33 @@ function uniqueIds(values: Array<string | null | undefined>) {
   return Array.from(new Set(values.map(asId).filter(Boolean)));
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function readOperationalContextFromDeviceInfo(
+  deviceInfo: Record<string, unknown> | null | undefined
+): Partial<ActiveWorkContext> | null {
+  const root = asRecord(deviceInfo);
+  const context = asRecord(root?.operationalContext);
+  if (!context) return null;
+
+  const siteId = asId(context.siteId);
+  const areaId = asId(context.areaId);
+  const shiftId = asId(context.shiftId);
+  const operationalRole = asId(context.operationalRole);
+
+  if (!siteId && !areaId && !shiftId && !operationalRole) return null;
+
+  return {
+    siteId,
+    areaId,
+    shiftId,
+    operationalRole,
+  };
+}
+
 function isOperationalSite(site: SiteRow): boolean {
   return String(site.operational_visibility ?? "operational") === "operational";
 }
@@ -260,6 +307,56 @@ function buildNavGroups(rows: NavigationRow[]): NavGroup[] {
     label,
     items,
   }));
+}
+
+async function resolveActiveWorkContext({
+  supabase,
+  userId,
+}: {
+  supabase: SupabaseClient;
+  userId: string;
+}): Promise<ActiveWorkContext | null> {
+  const { data: lastAttendanceLog } = await supabase
+    .from("attendance_logs")
+    .select("action,site_id,shift_id,device_info")
+    .eq("employee_id", userId)
+    .in("action", ["check_in", "check_out"])
+    .order("occurred_at", { ascending: false })
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const log = lastAttendanceLog as AttendanceLogRow | null;
+
+  if (!log || log.action !== "check_in") return null;
+
+  const deviceContext = readOperationalContextFromDeviceInfo(log.device_info);
+  const shiftId = asId(deviceContext?.shiftId || log.shift_id);
+  let siteId = asId(deviceContext?.siteId || log.site_id);
+  let operationalRole = asId(deviceContext?.operationalRole);
+
+  if (shiftId && (!siteId || !operationalRole)) {
+    const { data: shiftRow } = await supabase
+      .from("employee_shifts")
+      .select("id,site_id,operational_role")
+      .eq("id", shiftId)
+      .eq("employee_id", userId)
+      .maybeSingle();
+
+    const shift = shiftRow as ShiftContextRow | null;
+
+    siteId = siteId || asId(shift?.site_id);
+    operationalRole = operationalRole || asId(shift?.operational_role);
+  }
+
+  if (!siteId && !operationalRole && !shiftId) return null;
+
+  return {
+    siteId,
+    areaId: asId(deviceContext?.areaId),
+    shiftId,
+    operationalRole,
+  };
 }
 
 async function resolveAllowedApps({
@@ -375,6 +472,9 @@ export async function VentoShell({ children }: { children: React.ReactNode }) {
   let sites: SiteRow[] = [];
   let activeSiteId = "";
   let activeAreaId = "";
+  let effectiveRole: string | null = null;
+  let activeContextLabel: string | null = null;
+  let activeContextDetail: string | null = null;
   let appSwitcherItems: AppSwitcherItem[] = [];
   let navGroups: NavGroup[] = [];
 
@@ -397,6 +497,7 @@ export async function VentoShell({ children }: { children: React.ReactNode }) {
       { data: employeeSettings },
       { data: currentEmployeeSite },
       { data: currentEmployeeArea },
+      activeWorkContext,
     ] = await Promise.all([
       supabase
         .from("employee_sites")
@@ -412,18 +513,21 @@ export async function VentoShell({ children }: { children: React.ReactNode }) {
         .maybeSingle(),
       supabase.rpc("current_employee_site_id"),
       supabase.rpc("current_employee_area_id"),
+      resolveActiveWorkContext({ supabase, userId: user.id }),
     ]);
 
     const employeeSiteRows = (employeeSites ?? []) as EmployeeSiteRow[];
     const settingsRow = employeeSettings as EmployeeSettingsRow | null;
 
     const assignedSiteIds = uniqueIds([
+      activeWorkContext?.siteId ?? null,
       ...employeeSiteRows.map((row) => row.site_id),
       employeeRow?.site_id ?? null,
     ]);
 
     const preferredSiteId = asId(
-      siteOverrideId ||
+      activeWorkContext?.siteId ||
+        siteOverrideId ||
         settingsRow?.selected_site_id ||
         currentEmployeeSite ||
         employeeSiteRows[0]?.site_id ||
@@ -436,7 +540,13 @@ export async function VentoShell({ children }: { children: React.ReactNode }) {
         ? preferredSiteId
         : assignedSiteIds[0] ?? "";
 
-    activeAreaId = asId(currentEmployeeArea);
+    activeAreaId = asId(activeWorkContext?.areaId || currentEmployeeArea);
+    effectiveRole = asId(activeWorkContext?.operationalRole) || role;
+
+    if (activeWorkContext?.siteId || activeWorkContext?.shiftId || activeWorkContext?.operationalRole) {
+      activeContextLabel = "Turno activo";
+      activeContextDetail = "Contexto operativo aplicado desde ANIMA";
+    }
 
     if (assignedSiteIds.length) {
       const { data: siteRows } = await supabase
@@ -464,20 +574,20 @@ export async function VentoShell({ children }: { children: React.ReactNode }) {
       }
     }
 
-    if (role) {
+    if (effectiveRole) {
       const [resolvedApps, resolvedNavGroups] = await Promise.all([
         resolveAllowedApps({
           supabase,
           activeSiteId,
           activeAreaId,
-          actualRole: role,
+          actualRole: effectiveRole,
         }),
         resolveNavigationItems({
           supabase,
           appCode: APP_CODE,
           activeSiteId,
           activeAreaId,
-          actualRole: role,
+          actualRole: effectiveRole,
         }),
       ]);
 
@@ -493,6 +603,8 @@ export async function VentoShell({ children }: { children: React.ReactNode }) {
       email={user?.email ?? null}
       sites={sites}
       activeSiteId={activeSiteId}
+      activeContextLabel={activeContextLabel}
+      activeContextDetail={activeContextDetail}
       appSwitcherItems={appSwitcherItems}
       navGroups={navGroups}
     >

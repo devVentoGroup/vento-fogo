@@ -2,6 +2,10 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { requireAppAccess } from "@/lib/auth/guard";
+import {
+  attachSharedDeviceActionSignatureTarget,
+  requireSharedDeviceActorSignature,
+} from "@/lib/auth/shared-device-signature";
 import { checkPermission } from "@/lib/auth/permissions";
 import {
   ProductionBatchRealForm,
@@ -254,10 +258,11 @@ async function createBatch(formData: FormData) {
   const recipeId = text(formData.get("recipe_id"));
   const destinationLocationId = text(formData.get("destination_location_id"));
   const notes = text(formData.get("notes"));
+  const sharedActorPin = text(formData.get("shared_actor_pin"));
   const qty = Number(text(formData.get("qty")));
   const returnTo = buildReturn(recipeId, Number.isFinite(qty) ? qty : 0, destinationLocationId);
 
-  const { supabase } = await requireAppAccess({
+  const { supabase, operationalSession } = await requireAppAccess({
     appId: APP_ID,
     returnTo,
     permissionCode: "production.recipe_book.view",
@@ -334,6 +339,27 @@ async function createBatch(formData: FormData) {
     args: Record<string, unknown>
   ) => Promise<{ data: unknown; error: { message?: string } | null }>;
 
+  const signatureResult = await requireSharedDeviceActorSignature({
+    supabase,
+    session: operationalSession,
+    actorPin: sharedActorPin,
+    appId: APP_ID,
+    actionCode: "production.batches.create",
+    targetTable: "production_batches",
+    metadata: {
+      recipe_card_id: recipeId,
+      produced_qty: qty,
+      destination_location_id: isOrderFulfillment ? null : destinationLocationId,
+      ingredient_count: ingredients.length,
+      package_count: isOrderFulfillment ? 0 : packages.length,
+      output_count: outputs.length,
+    },
+  });
+
+  if (!signatureResult.ok) {
+    redirect(buildReturn(recipeId, qty, destinationLocationId, signatureResult.message));
+  }
+
   const { data, error } = await callRealProductionBatchRpc("fogo_create_real_production_batch", {
     p_recipe_card_id: recipeId,
     p_produced_qty: qty,
@@ -349,6 +375,24 @@ async function createBatch(formData: FormData) {
   }
 
   const result = data as { batchId?: string | null; batchCode?: string | null } | null;
+
+  if (signatureResult.required && result?.batchId) {
+    const attachSignatureResult = await attachSharedDeviceActionSignatureTarget({
+      supabase,
+      signatureId: signatureResult.signatureId,
+      targetTable: "production_batches",
+      targetId: result.batchId,
+      metadata: { attached_after_insert: true },
+    });
+
+    if (!attachSignatureResult.ok) {
+      console.error("shared device production signature target attach failed", {
+        batch_id: result.batchId,
+        signature_id: signatureResult.signatureId,
+        message: attachSignatureResult.message,
+      });
+    }
+  }
   const qs = new URLSearchParams();
   qs.set("created", "1");
   qs.set("real", "1");
@@ -373,7 +417,7 @@ export default async function NewProductionBatchPage({
   const requestedDestinationId = String(sp.destination_location_id ?? "").trim();
   const error = String(sp.error ?? "").trim();
 
-  const { supabase } = await requireAppAccess({
+  const { supabase, operationalSession } = await requireAppAccess({
     appId: APP_ID,
     returnTo: "/production-batches/new",
     permissionCode: "production.recipe_book.view",
@@ -718,6 +762,7 @@ export default async function NewProductionBatchPage({
         ingredients={ingredientDrafts}
         outputs={outputDrafts}
         notesPlaceholder="Notas de producción, ajustes, textura, cocción, empaque o incidencias."
+        requiresSharedDeviceActorSignature={operationalSession.isSharedDevice}
       />
     </div>
   );

@@ -71,6 +71,7 @@ type ProductionBatchRealFormProps = {
   ingredients: ProductionIngredientDraft[];
   outputs: ProductionOutputDraft[];
   notesPlaceholder?: string;
+  requiresSharedDeviceActorSignature?: boolean;
 };
 
 function roundQty(value: number, digits = 3) {
@@ -333,6 +334,7 @@ export function ProductionBatchRealForm({
   ingredients,
   outputs,
   notesPlaceholder = "Opcional",
+  requiresSharedDeviceActorSignature = false,
 }: ProductionBatchRealFormProps) {
   const [producedQtyInput, setProducedQtyInput] = useState(String(initialProducedQty));
   const producedQty = roundQty(Number(producedQtyInput));
@@ -898,6 +900,23 @@ export function ProductionBatchRealForm({
           <span className="ui-label">Notas</span>
           <textarea className="ui-input mt-1 min-h-[104px] py-3" name="notes" placeholder={notesPlaceholder} />
         </label>
+        {requiresSharedDeviceActorSignature ? (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+            <div className="ui-label">Firma del trabajador</div>
+            <p className="mt-1 text-xs text-amber-900">
+              Ingresa el PIN del trabajador que confirma esta producción desde la terminal compartida.
+            </p>
+            <input
+              id="shared_actor_pin"
+              name="shared_actor_pin"
+              type="password"
+              inputMode="numeric"
+              autoComplete="off"
+              className="ui-input mt-3"
+              required
+            />
+          </div>
+        ) : null}
         <div className="rounded-lg border border-[#FED7AA] bg-[#FFF7ED] p-4">
           <div className="ui-label">Resumen</div>
           <div className="mt-2 space-y-1 text-sm text-[var(--ui-text)]">
